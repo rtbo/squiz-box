@@ -6,7 +6,7 @@ version (Posix)
     import core.sys.posix.sys.stat;
 }
 
-interface ArchiveCreateMember
+interface ArchiveEntry
 {
     @property string path() const;
     @property size_t size() const;
@@ -20,7 +20,7 @@ interface ArchiveCreateMember
     ubyte[] read(ubyte[] buffer);
 }
 
-class ArchiveCreateMemberPath : ArchiveCreateMember
+class ArchiveEntryFile : ArchiveEntry
 {
     import std.stdio : File;
 
@@ -64,9 +64,10 @@ class ArchiveCreateMemberPath : ArchiveCreateMember
         {
             import std.exception : errnoEnforce;
             import std.string : toStringz;
+            import core.sys.posix.sys.stat : posixStat = stat;
 
             stat_t result;
-            errnoEnforce(core.sys.posix.sys.stat.stat(toStringz(filePath), &result) == 0, "Could not retrieve file stat");
+            errnoEnforce(posixStat(toStringz(filePath), &result) == 0, "Could not retrieve file stat");
             return result;
         }
     }

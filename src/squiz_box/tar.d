@@ -7,68 +7,80 @@ import std.path;
 
 struct ArchiveTar
 {
-    static auto createWithFiles(const(string)[] files, string baseDir = null)
+    static ArchiveTarCreate createWithFiles(F)(F files, string baseDir = null)
     {
-        return ArchiveTarCreate(files.dup, baseDir);
-    }
-}
-
-private struct ArchiveTarCreate
-{
-    string[] files;
-    string baseDir;
-
-    auto byChunk(size_t chunkSz)
-    in (chunkSz % 512 == 0)
-    {
-        auto memb = makeFiles();
-        return ArchiveTarCreateByChunk(chunkSz, memb);
+        auto entries = makeEntries(files, baseDir);
+        return ArchiveTarCreate(entries);
     }
 
-    private ArchiveCreateMember[] makeFiles()
+    private static ArchiveEntry[] makeEntries(F)(F files, string baseDir)
     {
         import std.file : getcwd;
 
         string base = baseDir ? baseDir : getcwd();
 
-        ArchiveCreateMember[] memb;
+        ArchiveEntry[] entries;
         foreach (f; files)
         {
             string archivePath = absolutePath(f);
             archivePath = relativePath(archivePath, base);
             archivePath = buildNormalizedPath(archivePath);
-            memb ~= new ArchiveCreateMemberPath(f, archivePath);
+            entries ~= new ArchiveEntryFile(f, archivePath);
         }
-        return memb;
+        return entries;
     }
+}
+
+struct ArchiveTarCreate
+{
+    ArchiveEntry[] entries;
+
+    auto byChunk(size_t chunkSz=4096)
+    in (chunkSz % 512 == 0, "chunk size must be a multiple of 512")
+    {
+        return ArchiveTarCreateByChunk(chunkSz, entries);
+    }
+
+    void writeToFile(string archiveFilePath)
+    {
+        import std.stdio : File;
+
+        auto f = File(archiveFilePath, "wb");
+        foreach (chunk; byChunk())
+        {
+            f.rawWrite(chunk);
+        }
+        f.close();
+    }
+
 }
 
 private struct ArchiveTarCreateByChunk
 {
     // init data
     ubyte[] buffer;
-    ArchiveCreateMember[] remainingFiles;
+    ArchiveEntry[] remainingEntries;
 
     // current chunk
     ubyte[] chunk;
     ubyte[] avail;
 
-    // current file being processed
-    ArchiveCreateMember file;
+    // current entry being processed
+    ArchiveEntry entry;
     bool eof;
 
-    this(size_t bufSize, ArchiveCreateMember[] files)
+    this(size_t bufSize, ArchiveEntry[] entries)
     {
         enforce(bufSize % 512 == 0, "buffer size must be a multiple of 512");
         buffer = new ubyte[bufSize];
-        remainingFiles = files;
+        remainingEntries = entries;
         avail = buffer;
         popFront();
     }
 
     @property bool empty() const
     {
-        const res = !buffer || (!chunk.length && remainingFiles.length == 0 && eof);
+        const res = !buffer || (!chunk.length && remainingEntries.length == 0 && eof);
         return res;
     }
 
@@ -95,23 +107,23 @@ private struct ArchiveTarCreateByChunk
 
     private bool moreToRead() const
     {
-        return remainingFiles.length || !eof;
+        return remainingEntries.length || !eof;
     }
 
     private void nextBlock()
     in (avail.length >= 512)
     {
-        if (!file || eof)
+        if (!entry || eof)
         {
-            enforce(remainingFiles.length);
-            file = remainingFiles[0];
-            remainingFiles = remainingFiles[1 .. $];
-            avail = TarHeader.fillWith(file, avail);
+            enforce(remainingEntries.length);
+            entry = remainingEntries[0];
+            remainingEntries = remainingEntries[1 .. $];
+            avail = TarHeader.fillWith(entry, avail);
             eof = false;
         }
         else
         {
-            auto filled = file.read(avail);
+            auto filled = entry.read(avail);
             eof = filled.length != avail.length;
             avail = avail[filled.length .. $];
             if (eof)
@@ -127,26 +139,26 @@ private struct ArchiveTarCreateByChunk
 private struct TarHeader
 {
     // dfmt off
-    char [100]  name;       // 0
-    char [8]    mode;       // 100
-    char [8]    uid;        // 108
-    char [8]    gid;        // 116
-    char [12]   size;       // 124
-    char [12]   mtime;      // 136
-    char [8]    chksum;     // 148  94
-    Typeflag    typeflag;   // 156  9C
-    char [100]  linkname;   // 157
-    char [6]    magic;      // 257
-    char [2]    version_;   // 263
-    char [32]   uname;      // 265
-    char [32]   gname;      // 297
-    char [8]    devmajor;   // 329
-    char [8]    devminor;   // 337
-    char [155]  prefix;     // 345
-    char [12]   padding;    // 500
+    char [100]  name;       //   0    0
+    char [8]    mode;       // 100   64
+    char [8]    uid;        // 108   6C
+    char [8]    gid;        // 116   74
+    char [12]   size;       // 124   7C
+    char [12]   mtime;      // 136   88
+    char [8]    chksum;     // 148   94
+    Typeflag    typeflag;   // 156   9C
+    char [100]  linkname;   // 157   9D
+    char [6]    magic;      // 257  101
+    char [2]    version_;   // 263  107
+    char [32]   uname;      // 265  109
+    char [32]   gname;      // 297  129
+    char [8]    devmajor;   // 329  149
+    char [8]    devminor;   // 337  151
+    char [155]  prefix;     // 345  159
+    char [12]   padding;    // 500  1F4
     //dfmt on
 
-    private static ubyte[] fillWith(ArchiveCreateMember file, ubyte[] block)
+    private static ubyte[] fillWith(ArchiveEntry file, ubyte[] block)
     in (block.length >= 512)
     {
         import std.conv : octal;
@@ -178,6 +190,7 @@ private struct TarHeader
             import std.algorithm : min;
 
             const stat = file.stat();
+
             toOctString(stat.st_mode & octal!"777", th.mode[0 .. $ - 1]);
             toOctString(stat.st_uid, th.uid[0 .. $ - 1]);
             toOctString(stat.st_gid, th.gid[0 .. $ - 1]);
@@ -212,7 +225,7 @@ private struct TarHeader
         else version (Windows)
         {
             // default to mode 644 which is the most common on UNIX
-            th.mode[4 .. 7] = ['6', '4', '4'];
+            th.mode[0 .. 7] = "0000644";
             th.typeflag = Typeflag.normal;
 
             // TODO: https://docs.microsoft.com/fr-fr/windows/win32/secauthz/finding-the-owner-of-a-file-object-in-c--
