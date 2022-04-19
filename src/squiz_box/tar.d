@@ -5,6 +5,7 @@ import squiz_box.core;
 import std.datetime.systime;
 import std.exception;
 import std.path;
+import std.range.interfaces;
 
 struct ArchiveTar
 {
@@ -246,14 +247,59 @@ private class ArchiveTarReadEntry : ArchiveEntry
         }
     }
 
-    ubyte[] read(ubyte[] buffer)
+    InputRange!(ubyte[]) byChunk(size_t chunkSize)
+    {
+        return inputRangeObject(FileByChunk(_file, _offset, _end, chunkSize));
+    }
+}
+
+private struct FileByChunk
+{
+    import std.stdio : File;
+
+    private File file;
+    private size_t start;
+    private size_t end;
+    private ubyte[] chunk;
+    private ubyte[] buffer;
+
+    this(File file, size_t start, size_t end, size_t chunkSize)
+    in(end >= start)
+    in(chunkSize > 0)
+    in(file.size >= end)
+    {
+        this.file = file;
+        this.start = start;
+        this.end = end;
+        this.buffer = new ubyte[chunkSize];
+        popFront();
+    }
+
+    @property bool empty()
+    {
+        return chunk.length == 0;
+    }
+
+    @property ubyte[] front()
+    {
+        return chunk;
+    }
+
+    void popFront()
     {
         import std.algorithm : min;
 
-        const len = _offset >= _end ? 0 : min(buffer.length, _end - _offset);
+        const len = min(buffer.length, end - start);
+        if (len == 0)
+        {
+            chunk = null;
+            return;
+        }
 
-        _file.seek(_offset);
-        return _file.rawRead(buffer[0 .. len]);
+        file.seek(start);
+        chunk = file.rawRead(buffer[0 .. len]);
+        enforce(chunk.length == len, "Could not read file as expected");
+        start += chunk.length;
     }
 }
 
@@ -263,13 +309,13 @@ private struct ArchiveTarCreateByChunk
     ubyte[] buffer;
     ArchiveEntry[] remainingEntries;
 
-    // current chunk
-    ubyte[] chunk;
-    ubyte[] avail;
+    // current chunk (front data)
+    ubyte[] chunk; // data ready
+    ubyte[] avail; // space available in buffer (after chunk)
 
     // current entry being processed
     ArchiveEntry entry;
-    bool eof;
+    InputRange!(ubyte[]) entryChunk;
 
     this(size_t bufSize, ArchiveEntry[] entries)
     {
@@ -280,13 +326,13 @@ private struct ArchiveTarCreateByChunk
         popFront();
     }
 
-    @property bool empty() const
+    @property bool empty()
     {
-        const res = !buffer || (!chunk.length && remainingEntries.length == 0 && eof);
+        const res = !buffer || (!chunk.length && remainingEntries.length == 0 && (!entryChunk || entryChunk.empty));
         return res;
     }
 
-    @property const(ubyte)[] front() const
+    @property const(ubyte)[] front()
     {
         return chunk;
     }
@@ -307,28 +353,28 @@ private struct ArchiveTarCreateByChunk
         avail = buffer;
     }
 
-    private bool moreToRead() const
+    private bool moreToRead()
     {
-        return remainingEntries.length || !eof;
+        return remainingEntries.length || (entryChunk && !entryChunk.empty);
     }
 
     private void nextBlock()
     in (avail.length >= 512)
     {
-        if (!entry || eof)
+        if (!entry || !entryChunk || entryChunk.empty)
         {
             enforce(remainingEntries.length);
             entry = remainingEntries[0];
             remainingEntries = remainingEntries[1 .. $];
             avail = TarHeader.fillWith(entry, avail);
-            eof = false;
+            entryChunk = entry.byChunk(512);
         }
         else
         {
-            auto filled = entry.read(avail);
-            eof = filled.length != avail.length;
+            auto filled = entryChunk.front;
             avail = avail[filled.length .. $];
-            if (eof)
+            entryChunk.popFront();
+            if (entryChunk.empty)
             {
                 const pad = avail.length % 512;
                 avail[0 .. pad] = 0;

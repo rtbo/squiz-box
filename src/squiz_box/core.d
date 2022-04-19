@@ -2,6 +2,7 @@ module squiz_box.core;
 
 import std.datetime.systime;
 import std.exception;
+import std.range.interfaces;
 
 version (Posix)
 {
@@ -54,19 +55,18 @@ interface ArchiveEntry
         @property int groupId();
     }
 
-    ubyte[] read(ubyte[] buffer);
+    InputRange!(ubyte[]) byChunk(size_t chunkSize=4096);
 
     final ubyte[] readContent()
     {
-        ubyte[4096] buffer;
-        ubyte[] result;
+        ubyte[] result = new ubyte[size];
+        size_t offset;
 
-        while (true)
+        foreach(chunk; byChunk())
         {
-            auto chunk = read(buffer[]);
-            result ~= chunk;
-            if (chunk.length < 4096)
-                break;
+            assert(offset + chunk.length <= result.length);
+            result[offset .. offset+chunk.length] = chunk;
+            offset += chunk.length;
         }
 
         return result;
@@ -179,6 +179,11 @@ class ArchiveEntryFile : ArchiveEntry
 
             return statStruct.st_gid;
         }
+    }
+
+    InputRange!(ubyte[]) byChunk(size_t chunkSize)
+    {
+        return inputRangeObject(file.byChunk(chunkSize));
     }
 
     ubyte[] read(ubyte[] buffer)

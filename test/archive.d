@@ -71,13 +71,16 @@ unittest
     Entry[] entries;
     foreach (entry; archive.entries)
     {
-        entries ~= Entry(entry.path, entry.permissions, entry.size, hexDigest!SHA1(
-                entry.readContent()));
+        const content = entry.readContent;
+
+        entries ~= Entry(
+            entry.path,
+            entry.permissions,
+            entry.size,
+            hexDigest!SHA1(content)
+        );
     }
 
-    import std.stdio;
-
-    writeln(entries);
 
     assert(entries == expected);
 }
