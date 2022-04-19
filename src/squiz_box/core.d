@@ -71,6 +71,22 @@ interface ArchiveEntry
 
         return result;
     }
+
+    /// Check if the entry is a potential bomb.
+    /// A bomb is typically an entry that may overwrite other files
+    /// outside of the extraction directory.
+    /// In addition, a criteria of maximum allowed size can be provided (by default all sizes are accepted).
+    final bool isBomb(size_t allowedSz = size_t.max)
+    {
+        import std.path : buildNormalizedPath, isAbsolute;
+        import std.string : startsWith;
+
+        if (allowedSz != size_t.max && size > allowedSz)
+            return true;
+
+        const p = path;
+        return isAbsolute(p) || buildNormalizedPath(p).startsWith("..");
+    }
 }
 
 class ArchiveEntryFile : ArchiveEntry
