@@ -44,3 +44,40 @@ unittest
     assert(matchFirst(lines[1], line2));
     assert(matchFirst(lines[2], line3));
 }
+
+@("Read tar")
+unittest
+{
+    import std.conv : octal;
+    import std.digest.sha : SHA1;
+    import std.digest : hexDigest;
+
+    struct Entry
+    {
+        string path;
+        uint permissions;
+        size_t size;
+        char[40] sha1;
+    }
+
+    const expected = [
+        Entry("file1.txt", octal!"644", 7, "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC"),
+        Entry("file 2.txt", octal!"644", 3521, "01FA4C5C29A58449EEF1665658C48C0D7829C45F"),
+        Entry("folder/chmod 666.txt", octal!"666", 26, "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3"),
+    ];
+
+    auto archive = ArchiveTar.readFromPath(testPath("data/archive.tar"));
+
+    Entry[] entries;
+    foreach (entry; archive.entries)
+    {
+        entries ~= Entry(entry.path, entry.permissions, entry.size, hexDigest!SHA1(
+                entry.readContent()));
+    }
+
+    import std.stdio;
+
+    writeln(entries);
+
+    assert(entries == expected);
+}
