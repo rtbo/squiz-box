@@ -83,6 +83,66 @@ struct ArchiveTarRead
 
         return ArchiveTarReadEntries(File(archivePath, "rb"));
     }
+
+    void extractTo(string directory)
+    {
+        import std.file : exists, isDir, mkdirRecurse, setTimes, symlink, timeLastAccessed;
+        import std.path : buildNormalizedPath, dirName;
+        import std.stdio : File;
+
+        enforce(exists(directory) && isDir(directory));
+
+        foreach(entry; entries)
+        {
+            enforce(
+                !entry.isBomb,
+                "TAR bomb detected! Extraction aborted (entry will extract to " ~
+                entry.path ~ " - outside of extraction directory).",
+            );
+
+            const path = buildNormalizedPath(directory, entry.path);
+
+            final switch (entry.type)
+            {
+            case EntryType.directory:
+                mkdirRecurse(path);
+                break;
+            case EntryType.symlink:
+                version (Posix)
+                {
+                    import core.sys.posix.unistd : lchown;
+                    import std.string : toStringz;
+
+                    mkdirRecurse(dirName(path));
+                    symlink(entry.linkname, path);
+                    lchown(toStringz(path), entry.ownerId, entry.groupId);
+
+                    break;
+                }
+            case EntryType.regular:
+                mkdirRecurse(dirName(path));
+                auto f = File(path, "wb");
+                foreach (chunk; entry.byChunk())
+                {
+                    f.rawWrite(chunk);
+                }
+                f.close();
+
+                setTimes(path, Clock.currTime, entry.timeLastModified);
+
+                version (Posix)
+                {
+                    import core.sys.posix.sys.stat : chmod;
+                    import core.sys.posix.unistd : chown;
+                    import std.string : toStringz;
+
+                    chmod(toStringz(path), cast(uint)entry.permissions);
+                    chown(toStringz(path), entry.ownerId, entry.groupId);
+                }
+                break;
+            }
+        }
+    }
 }
 
 private struct ArchiveTarReadEntries
@@ -159,7 +219,7 @@ private struct ArchiveTarReadEntries
         data.type = toEntryType(th.typeflag);
         data.linkname = parseString(th.linkname).idup;
         data.size = parseOctalString!size_t(th.size);
-        data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mode)));
+        data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
         version (Posix)
         {
             data.ownerId = parseOctalString(th.uid);
