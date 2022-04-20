@@ -16,7 +16,7 @@ string[] filesForArchive()
 @("Write tar")
 unittest
 {
-    import std.algorithm : canFind;
+    import std.algorithm : canFind, sum;
     import std.conv : to;
     import std.file : read;
     import std.process : execute, executeShell, escapeShellFileName;
@@ -68,6 +68,11 @@ unittest
     res = executeShell("tar -xOf " ~ archiveShell ~ " 'folder/chmod 666.txt' | sha1sum");
     assert(res.status == 0);
     assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+
+    enum expectedLen = 2*512 + 512 + 3584 + 2*512 + 2*512;
+    auto content = cast(const(ubyte)[])read(archive.path);
+    assert(content.length  == expectedLen);
+    assert(content[$-1024 .. $].sum() == 0);
 }
 
 @("Read tar")

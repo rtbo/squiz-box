@@ -376,22 +376,20 @@ private struct ArchiveTarCreateByChunk
     {
         if (!moreToRead())
         {
+            if (footer >= footerLen)
+            {
                 chunk = null;
-                return;
-            // if (footer >= footerLen)
-            // {
-            //     chunk = null;
-            // }
-            // else
-            // {
-            //     import std.algorithm : min;
+            }
+            else
+            {
+                import std.algorithm : min;
 
-            //     const len = min(buffer.length, footerLen - footer);
-            //     buffer[0 .. len] = 0;
-            //     chunk = buffer[0 .. len];
-            //     footer += len;
-            // }
-            // return;
+                const len = min(buffer.length, footerLen - footer);
+                buffer[0 .. len] = 0;
+                chunk = buffer[0 .. len];
+                footer += len;
+            }
+            return;
         }
 
         while (avail.length && moreToRead)
