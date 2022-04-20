@@ -82,7 +82,8 @@ struct ArchiveTarRead
     {
         import std.stdio : File;
 
-        return ArchiveTarReadEntries(File(archivePath, "rb"));
+        auto input = new FileDataInput(File(archivePath, "rb"));
+        return ArchiveTarReadEntries(input);
     }
 
     void extractTo(string directory)
@@ -100,45 +101,44 @@ struct ArchiveTarRead
 
 private struct ArchiveTarReadEntries
 {
-    import std.stdio : File;
-
-    private File file;
-    private size_t totalSz;
+    private DataInput _input;
 
     // current header data
-    private size_t offset;
-    private size_t next;
-    private ubyte[] block;
-    private EntryData data;
+    private size_t _next;
+    private ubyte[] _block;
+    private ArchiveEntry _entry;
 
-    this(File file)
+    this(DataInput input)
     {
-        this.file = file;
-        totalSz = file.size;
-        enforce(
-            totalSz % 512 == 0,
-            "inconsistent size of tar file (not multiple of 512): " ~ file.name
-        );
-        block = new ubyte[512];
+        _input = input;
+        _block = new ubyte[512];
 
         // file with zero bytes is a valid tar file
-        if (totalSz > 0)
+        if (!_input.eoi)
             readHeaderBlock();
     }
 
     @property bool empty()
     {
-        return next >= totalSz;
+        return _input.eoi;
     }
 
     @property ArchiveEntry front()
     {
-        return new ArchiveTarReadEntry(file, offset + 512, data);
+        return _entry;
     }
 
     void popFront()
     {
-        offset = next;
+        assert(_input.pos <= _next);
+
+        if (_input.pos < _next)
+        {
+            // the current entry was not fully read, we move the stream forward
+            // up to the next header
+            const dist = _next - _input.pos;
+            _input.ffw(dist);
+        }
         readHeaderBlock();
     }
 
@@ -146,10 +146,9 @@ private struct ArchiveTarReadEntries
     {
         import std.conv : to;
 
-        file.seek(offset);
-        file.rawRead(block);
+        enforce(_input.read(_block).length == 512, "Unexpected end of input");
 
-        TarHeader* th = cast(TarHeader*) block.ptr;
+        TarHeader* th = cast(TarHeader*) _block.ptr;
 
         const computed = th.unsignedChecksum();
         const checksum = parseOctalString(th.chksum);
@@ -158,18 +157,23 @@ private struct ArchiveTarReadEntries
         {
             // this is an empty header (only zeros)
             // indicates end of archive
-            next = totalSz;
+
+            while (!_input.eoi)
+            {
+                _input.ffw(512);
+            }
             return;
         }
 
         enforce(
             checksum == computed,
-            file.name ~ ": Invalid TAR checksum at 0x" ~ (
-                offset + th.chksum.offsetof).to!string(
+            "Invalid TAR checksum at 0x" ~ (
+                _input.pos - 512 + th.chksum.offsetof).to!string(
                 16) ~
                 "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
         );
 
+        EntryData data;
         data.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
         data.type = toEntryType(th.typeflag);
         data.linkname = parseString(th.linkname).idup;
@@ -182,7 +186,9 @@ private struct ArchiveTarReadEntries
             data.permissions = cast(Permissions) parseOctalString(th.mode);
         }
 
-        next = next512(offset + 512 + data.size);
+        _entry = new ArchiveTarReadEntry(_input, data);
+
+        _next = next512(_input.pos + data.size);
     }
 }
 
@@ -206,16 +212,16 @@ private class ArchiveTarReadEntry : ArchiveEntry
 {
     import std.stdio : File;
 
-    private File _file;
-    private size_t _offset;
+    private DataInput _input;
+    private size_t _start;
     private size_t _end;
     private EntryData _data;
 
-    this(File file, size_t offset, EntryData data)
+    this(DataInput input, EntryData data)
     {
-        _file = file;
-        _offset = offset;
-        _end = offset + data.size;
+        _input = input;
+        _start = input.pos;
+        _end = _start + data.size;
         _data = data;
     }
 
@@ -266,57 +272,11 @@ private class ArchiveTarReadEntry : ArchiveEntry
     {
         import std.range.interfaces : inputRangeObject;
 
-        return inputRangeObject(FileByChunk(_file, _offset, _end, chunkSize));
-    }
-}
-
-private struct FileByChunk
-{
-    import std.stdio : File;
-
-    private File file;
-    private size_t start;
-    private size_t end;
-    private ubyte[] chunk;
-    private ubyte[] buffer;
-
-    this(File file, size_t start, size_t end, size_t chunkSize)
-    in (end >= start)
-    in (chunkSize > 0)
-    in (file.size >= end)
-    {
-        this.file = file;
-        this.start = start;
-        this.end = end;
-        this.buffer = new ubyte[chunkSize];
-        popFront();
-    }
-
-    @property bool empty()
-    {
-        return chunk.length == 0;
-    }
-
-    @property ubyte[] front()
-    {
-        return chunk;
-    }
-
-    void popFront()
-    {
-        import std.algorithm : min;
-
-        const len = min(buffer.length, end - start);
-        if (len == 0)
-        {
-            chunk = null;
-            return;
-        }
-
-        file.seek(start);
-        chunk = file.rawRead(buffer[0 .. len]);
-        enforce(chunk.length == len, "Could not read file as expected");
-        start += chunk.length;
+        enforce (
+            _input.pos == _start,
+            "Data cursor has moved, this entry is not valid anymore"
+        );
+        return inputRangeObject(DataInputRange(_input, chunkSize, _end));
     }
 }
 

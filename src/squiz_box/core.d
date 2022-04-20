@@ -8,7 +8,8 @@ import std.range.interfaces;
 interface DataInput
 {
     @property size_t pos();
-    @property bool end();
+    @property bool eoi();
+    void ffw(size_t dist);
     ubyte[] read(ubyte[] buffer);
 }
 
@@ -22,7 +23,7 @@ class FileDataInput : DataInput
     size_t _pos;
     size_t _end;
 
-    this (File file, size_t start=0, size_t end=size_t.max)
+    this(File file, size_t start = 0, size_t end = size_t.max)
     {
         _file = file;
         _file.seek(start);
@@ -34,9 +35,19 @@ class FileDataInput : DataInput
         return _pos;
     }
 
-    @property bool end()
+    @property bool eoi()
     {
         return _pos >= _end;
+    }
+
+    void ffw(size_t dist)
+    {
+        import std.algorithm : min;
+        import std.stdio : SEEK_CUR;
+
+        dist = min(dist, _end - _pos);
+        _file.seek(dist, SEEK_CUR);
+        _pos += dist;
     }
 
     ubyte[] read(ubyte[] buffer)
@@ -67,21 +78,25 @@ template isByteRange(BR)
 static assert(isByteRange!ByteRange);
 
 /// Range based data input
-class RangeDataInput(BR) : ByteInput
-if (isByteRange!BR)
+class RangeDataInput(BR) : ByteInput if (isByteRange!BR)
 {
     private BR _input;
     private size_t _pos;
     private ubyte[] _chunk;
 
-    this (BR input)
+    this(BR input)
     {
         _input = input;
+
         if (!_input.empty)
-        {
-            _chunk = _input.front;
-            _input.popFront();
-        }
+            prime();
+    }
+
+    private void prime()
+    in (!_input.empty)
+    {
+        _chunk = _input.front;
+        _input.popFront();
     }
 
     @property size_t pos()
@@ -89,9 +104,25 @@ if (isByteRange!BR)
         return _pos;
     }
 
-    @property bool end()
+    @property bool eoi()
     {
         return chunk.length == 0;
+    }
+
+    void ffw(size_t dist)
+    {
+        import std.algorithm : min;
+
+        while (dist > 0 && _chunk.length)
+        {
+            const len = min(_chunk.length, dist);
+            _chunk = _chunk[len .. $];
+            _pos += len;
+            dist -= len;
+
+            if (_chunk.length == 0 && !_input.empty)
+                prime();
+        }
     }
 
     ubyte[] read(ubyte[] buffer)
@@ -111,11 +142,56 @@ if (isByteRange!BR)
             _chunk = _chunk[len .. $];
 
             if (!_chunk.length && !_input.empty)
-            {
-                _chunk = _input.front();
-                _input.popFront();
-            }
+                prime();
         }
+    }
+}
+
+/// Range that takes data from DataInput.
+/// Optionally stopping before data is exhausted.
+struct DataInputRange
+{
+    private DataInput _input;
+    private size_t _end;
+    private ubyte[] _buffer;
+    private ubyte[] _chunk;
+
+    this (DataInput input, size_t chunkSize = 4096, size_t end = size_t.max)
+    {
+        _input = input;
+        _end = end;
+        _buffer = new ubyte[chunkSize];
+        if (!_input.eoi)
+            prime();
+    }
+
+    private void prime()
+    {
+        import std.algorithm : min;
+
+        const len = min(_buffer.length, _end - _input.pos);
+        if (len == 0)
+            _chunk = null;
+        else
+            _chunk = _input.read(_buffer[0 .. len]);
+    }
+
+    @property bool empty()
+    {
+        return (_input.eoi || _input.pos >= _end) && _chunk.length == 0;
+    }
+
+    @property ubyte[] front()
+    {
+        return _chunk;
+    }
+
+    void popFront()
+    {
+        if (!_input.eoi)
+            prime();
+        else
+            _chunk = null;
     }
 }
 
