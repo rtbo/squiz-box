@@ -7,6 +7,8 @@ import std.exception;
 import std.path;
 import std.range.interfaces;
 
+import std.stdio;
+
 struct ArchiveTar
 {
     static ArchiveTarCreate createWithFiles(F)(F files, string baseDir = null)
@@ -90,7 +92,7 @@ struct ArchiveTarRead
 
         enforce(exists(directory) && isDir(directory));
 
-        foreach(entry; entries)
+        foreach (entry; entries)
         {
             entry.extractTo(directory);
         }
@@ -163,8 +165,10 @@ private struct ArchiveTarReadEntries
 
         enforce(
             checksum == computed,
-            file.name ~ ": Invalid TAR checksum at 0x" ~ (offset + th.chksum.offsetof).to!string(16) ~
-            "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
+            file.name ~ ": Invalid TAR checksum at 0x" ~ (
+                offset + th.chksum.offsetof).to!string(
+                16) ~
+                "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
         );
 
         data.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
@@ -176,7 +180,7 @@ private struct ArchiveTarReadEntries
         {
             data.ownerId = parseOctalString(th.uid);
             data.groupId = parseOctalString(th.gid);
-            data.permissions = cast(Permissions)parseOctalString(th.mode);
+            data.permissions = cast(Permissions) parseOctalString(th.mode);
         }
 
         next = next512(offset + 512 + data.size);
@@ -276,9 +280,9 @@ private struct FileByChunk
     private ubyte[] buffer;
 
     this(File file, size_t start, size_t end, size_t chunkSize)
-    in(end >= start)
-    in(chunkSize > 0)
-    in(file.size >= end)
+    in (end >= start)
+    in (chunkSize > 0)
+    in (file.size >= end)
     {
         this.file = file;
         this.start = start;
@@ -329,6 +333,10 @@ private struct ArchiveTarCreateByChunk
     ArchiveEntry entry;
     InputRange!(ubyte[]) entryChunk;
 
+    // footer is two empty blocks
+    size_t footer;
+    enum footerLen = 1024;
+
     this(size_t bufSize, ArchiveEntry[] entries)
     {
         enforce(bufSize % 512 == 0, "buffer size must be a multiple of 512");
@@ -340,8 +348,23 @@ private struct ArchiveTarCreateByChunk
 
     @property bool empty()
     {
-        const res = !buffer || (!chunk.length && remainingEntries.length == 0 && (!entryChunk || entryChunk.empty));
-        return res;
+        // handle .init
+        if (!buffer)
+            return true;
+
+        // more files to be processed
+        if (remainingEntries.length)
+            return false;
+
+        // current file not exhausted
+        if (hasEntryChunk())
+            return false;
+
+        // some unconsumed flying data
+        if (chunk.length)
+            return false;
+
+        return true;
     }
 
     @property const(ubyte)[] front()
@@ -351,10 +374,24 @@ private struct ArchiveTarCreateByChunk
 
     void popFront()
     {
-        if (chunk.length && !moreToRead())
+        if (!moreToRead())
         {
-            chunk = null;
-            return;
+                chunk = null;
+                return;
+            // if (footer >= footerLen)
+            // {
+            //     chunk = null;
+            // }
+            // else
+            // {
+            //     import std.algorithm : min;
+
+            //     const len = min(buffer.length, footerLen - footer);
+            //     buffer[0 .. len] = 0;
+            //     chunk = buffer[0 .. len];
+            //     footer += len;
+            // }
+            // return;
         }
 
         while (avail.length && moreToRead)
@@ -365,15 +402,20 @@ private struct ArchiveTarCreateByChunk
         avail = buffer;
     }
 
+    private bool hasEntryChunk()
+    {
+        return entryChunk && !entryChunk.empty;
+    }
+
     private bool moreToRead()
     {
-        return remainingEntries.length || (entryChunk && !entryChunk.empty);
+        return remainingEntries.length || hasEntryChunk();
     }
 
     private void nextBlock()
     in (avail.length >= 512)
     {
-        if (!entry || !entryChunk || entryChunk.empty)
+        if (!entry || !hasEntryChunk())
         {
             enforce(remainingEntries.length);
             entry = remainingEntries[0];
@@ -384,6 +426,7 @@ private struct ArchiveTarCreateByChunk
         else
         {
             auto filled = entryChunk.front;
+            avail[0 .. filled.length] = filled;
             avail = avail[filled.length .. $];
             entryChunk.popFront();
             if (entryChunk.empty)
