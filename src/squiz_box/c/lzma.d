@@ -1,4 +1,4 @@
-module xz.lzma;
+module squiz_box.c.lzma;
 
 import std.traits : isIntegral;
 
