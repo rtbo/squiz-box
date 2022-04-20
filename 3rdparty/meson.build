@@ -1,1 +1,1 @@
-subdir('xz')
+subdir('xz-5.2.5')

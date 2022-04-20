@@ -162,17 +162,17 @@ xz_inc = include_directories([
 ])
 
 cc = meson.get_compiler('c')
-conf_data = configuration_data()
+xz_conf_data = configuration_data()
 
-conf_data.set('sizeof_size_t', cc.sizeof('void*'))
-conf_data.set('HAVE__BOOL_H', cc.has_type('_Bool'))
-conf_data.set('HAVE_UNISTD_H', cc.has_header('unistd.h'))
-conf_data.set('HAVE_PTHREAD_CONDATTR_SETCLOCK', cc.has_header_symbol('pthread.h', 'pthread_condattr_setclock'))
+xz_conf_data.set('sizeof_size_t', cc.sizeof('void*'))
+xz_conf_data.set('HAVE__BOOL_H', cc.has_type('_Bool'))
+xz_conf_data.set('HAVE_UNISTD_H', cc.has_header('unistd.h'))
+xz_conf_data.set('HAVE_PTHREAD_CONDATTR_SETCLOCK', cc.has_header_symbol('pthread.h', 'pthread_condattr_setclock'))
 
-configure_file(
+xz_conf = configure_file(
     input: 'config.h.in',
     output: 'config.h',
-    configuration: conf_data,
+    configuration: xz_conf_data,
 )
 
 thread_dep = dependency('threads')
@@ -182,7 +182,8 @@ if host_machine.endian() == 'big'
     xz_defs += ['-DWORDS_BIGENDIAN']
 endif
 
-xz_lib = static_library('dop_xz', xz_src,
+xz_lib = static_library('xz', xz_conf, xz_src,
+    install: false,
     include_directories: xz_inc,
     c_args: xz_defs,
     dependencies: thread_dep,
