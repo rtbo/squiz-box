@@ -4,6 +4,8 @@ import std.datetime.systime;
 import std.exception;
 import std.range.interfaces;
 
+alias ByteRange = InputRange!(ubyte[]);
+
 version (Posix)
 {
     enum Permissions
@@ -55,7 +57,7 @@ interface ArchiveEntry
         @property int groupId();
     }
 
-    InputRange!(ubyte[]) byChunk(size_t chunkSize = 4096);
+    ByteRange byChunk(size_t chunkSize = 4096);
 
     final ubyte[] readContent()
     {
@@ -256,7 +258,7 @@ class ArchiveEntryFile : ArchiveEntry
         }
     }
 
-    InputRange!(ubyte[]) byChunk(size_t chunkSize)
+    ByteRange byChunk(size_t chunkSize)
     {
         return inputRangeObject(file.byChunk(chunkSize));
     }

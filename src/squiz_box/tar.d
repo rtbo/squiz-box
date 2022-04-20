@@ -5,7 +5,6 @@ import squiz_box.core;
 import std.datetime.systime;
 import std.exception;
 import std.path;
-import std.range.interfaces;
 
 import std.stdio;
 
@@ -263,8 +262,10 @@ private class ArchiveTarReadEntry : ArchiveEntry
         }
     }
 
-    InputRange!(ubyte[]) byChunk(size_t chunkSize)
+    ByteRange byChunk(size_t chunkSize)
     {
+        import std.range.interfaces : inputRangeObject;
+
         return inputRangeObject(FileByChunk(_file, _offset, _end, chunkSize));
     }
 }
@@ -331,7 +332,7 @@ private struct ArchiveTarCreateByChunk
 
     // current entry being processed
     ArchiveEntry entry;
-    InputRange!(ubyte[]) entryChunk;
+    ByteRange entryChunk;
 
     // footer is two empty blocks
     size_t footer;
@@ -626,17 +627,6 @@ private void toOctalString(T)(T val, char[] buf)
 
     sformat(buf, "%0*o", buf.length, val);
 }
-
-import std.traits;
-import std.range;
-
-alias Source = const(char)[];
-alias Target = uint;
-
-static assert(isInputRange!Source);
-static assert(isSomeChar!(ElementType!Source));
-static assert(isIntegral!Target);
-static assert(!is(Target == enum));
 
 private T parseOctalString(T = uint)(const(char)[] octal)
 {
