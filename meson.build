@@ -5,6 +5,9 @@ project('squiz-box', ['c', 'd'],
 subdir('3rdparty')
 
 squiz_src = files([
+    'src/squiz_box/c/lzma.d',
+    'src/squiz_box/c/zlib.d',
+
     'src/squiz_box/core.d',
     'src/squiz_box/tar.d',
 ])
