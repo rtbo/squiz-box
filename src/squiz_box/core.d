@@ -55,17 +55,17 @@ interface ArchiveEntry
         @property int groupId();
     }
 
-    InputRange!(ubyte[]) byChunk(size_t chunkSize=4096);
+    InputRange!(ubyte[]) byChunk(size_t chunkSize = 4096);
 
     final ubyte[] readContent()
     {
         ubyte[] result = new ubyte[size];
         size_t offset;
 
-        foreach(chunk; byChunk())
+        foreach (chunk; byChunk())
         {
             assert(offset + chunk.length <= result.length);
-            result[offset .. offset+chunk.length] = chunk;
+            result[offset .. offset + chunk.length] = chunk;
             offset += chunk.length;
         }
 
@@ -86,6 +86,64 @@ interface ArchiveEntry
 
         const p = path;
         return isAbsolute(p) || buildNormalizedPath(p).startsWith("..");
+    }
+
+    /// Extract the entry to a file under the given base directory
+    final void extractTo(string baseDirectory)
+    {
+        import std.file : exists, isDir, mkdirRecurse, setTimes;
+        import std.path : buildNormalizedPath, dirName;
+        import std.stdio : File;
+
+        assert(exists(baseDirectory) && isDir(baseDirectory));
+
+        enforce(
+            !this.isBomb,
+            "archive bomb detected! Extraction aborted (entry will extract to " ~
+                this.path ~ " - outside of extraction directory).",
+        );
+
+        const extractPath = buildNormalizedPath(baseDirectory, this.path);
+
+        final switch (this.type)
+        {
+        case EntryType.directory:
+            mkdirRecurse(extractPath);
+            break;
+        case EntryType.symlink:
+            version (Posix)
+            {
+                import core.sys.posix.unistd : lchown;
+                import std.file : symlink;
+                import std.string : toStringz;
+
+                mkdirRecurse(dirName(extractPath));
+                symlink(this.linkname, extractPath);
+                lchown(toStringz(extractPath), this.ownerId, this.groupId);
+                break;
+            }
+        case EntryType.regular:
+            mkdirRecurse(dirName(extractPath));
+            auto f = File(extractPath, "wb");
+            foreach (chunk; this.byChunk())
+            {
+                f.rawWrite(chunk);
+            }
+            f.close();
+
+            setTimes(extractPath, Clock.currTime, this.timeLastModified);
+
+            version (Posix)
+            {
+                import core.sys.posix.sys.stat : chmod;
+                import core.sys.posix.unistd : chown;
+                import std.string : toStringz;
+
+                chmod(toStringz(extractPath), cast(uint) this.permissions);
+                chown(toStringz(extractPath), this.ownerId, this.groupId);
+            }
+            break;
+        }
     }
 }
 
@@ -122,21 +180,22 @@ class ArchiveEntryFile : ArchiveEntry
     {
         import std.file : isDir, isSymlink;
 
-        if (isDir(filePath)) return EntryType.directory;
-        if (isSymlink(filePath)) return EntryType.symlink;
+        if (isDir(filePath))
+            return EntryType.directory;
+        if (isSymlink(filePath))
+            return EntryType.symlink;
         return EntryType.regular;
     }
 
     @property string linkname()
     {
-        version(Posix)
+        version (Posix)
         {
             import std.file : readLink;
 
             return readLink(filePath);
         }
     }
-
 
     @property size_t size()
     {
@@ -177,9 +236,9 @@ class ArchiveEntryFile : ArchiveEntry
         {
             ensureStat();
 
-            enum int mask = cast(int)Permissions.mask;
+            enum int mask = cast(int) Permissions.mask;
 
-            return cast(Permissions) (statStruct.st_mode & mask);
+            return cast(Permissions)(statStruct.st_mode & mask);
         }
 
         @property int ownerId()
