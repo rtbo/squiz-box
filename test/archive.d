@@ -13,39 +13,18 @@ string[] filesForArchive()
     ];
 }
 
-@("Write tar")
-unittest
+void testArchiveContent(string archivePath)
 {
-    import std.algorithm : canFind, sum;
-    import std.conv : to;
-    import std.file : read;
+    import std.algorithm : canFind;
     import std.process : execute, executeShell, escapeShellFileName;
     import std.regex : matchFirst;
-    import std.stdio : File;
     import std.string : splitLines;
-
-    struct Path
-    {
-        string path;
-    }
-
-    //auto archive = DeleteMe("archive", ".tar");
-    auto archive = Path("test_archive.tar");
-    const files = filesForArchive();
-    auto tar = ArchiveTar.createWithFiles(files, testPath("data"));
-
-    auto f = File(archive.path, "wb");
-    foreach (chunk; tar.byChunk(4096))
-    {
-        f.rawWrite(chunk);
-    }
-    f.close();
 
     const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
     const line2 = `^-rw-r--r-- .+ 3521 .+ file 2.txt$`;
     const line3 = `^-rw-rw-rw- .+ 26 .+ folder/chmod 666.txt$`;
 
-    auto res = execute(["tar", "-tvf", archive.path]);
+    auto res = execute(["tar", "-tvf", archivePath]);
     assert(res.status == 0);
     const lines = res.output.splitLines();
     assert(lines.length == 3);
@@ -53,12 +32,10 @@ unittest
     assert(matchFirst(lines[1], line2));
     assert(matchFirst(lines[2], line3));
 
-    const archiveShell = escapeShellFileName(archive.path);
+    const archiveShell = escapeShellFileName(archivePath);
 
     res = executeShell("tar -xOf " ~ archiveShell ~ " file1.txt | sha1sum");
     assert(res.status == 0);
-    import std.stdio;
-    writeln(res.output);
     assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
 
     res = executeShell("tar -xOf " ~ archiveShell ~ " 'file 2.txt' | sha1sum");
@@ -69,10 +46,34 @@ unittest
     assert(res.status == 0);
     assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
 
+}
+
+@("Write tar")
+unittest
+{
+    import std.algorithm : sum;
+    import std.conv : to;
+    import std.file : read;
+    import std.stdio : File;
+
+    auto archive = DeleteMe("archive", ".tar");
+    const files = filesForArchive();
+    auto tar = ArchiveTar.createWithFiles(files, testPath("data"));
+
+    auto f = File(archive.path, "wb");
+    foreach (chunk; tar.byChunk(4096))
+    {
+        f.rawWrite(chunk);
+    }
+    f.close();
+
+    testArchiveContent(archive.path);
+
     enum expectedLen = 2*512 + 512 + 3584 + 2*512 + 2*512;
     auto content = cast(const(ubyte)[])read(archive.path);
     assert(content.length  == expectedLen);
     assert(content[$-1024 .. $].sum() == 0);
+
 }
 
 @("Read tar")
