@@ -46,6 +46,8 @@ enum defaultChunkSize = 8192;
 
 version (Posix)
 {
+    import core.sys.posix.sys.types : mode_t;
+
     enum Permissions
     {
         none = 0,
@@ -62,11 +64,79 @@ version (Posix)
         ownerWrit = 1 << 7,
         ownerRead = 1 << 8,
 
+        permMask = (1 << 9) - 1,
+
         setUid = 1 << 9,
         setGid = 1 << 10,
         sticky = 1 << 11,
 
+        specialMask = mask & ~permMask,
+
         mask = (1 << 12) - 1,
+    }
+
+    Permissions posixModeToPerms(mode_t mode)
+    {
+        import core.sys.posix.sys.stat;
+
+        auto perm = Permissions.none;
+        if (mode & S_IXOTH)
+            perm |= Permissions.otherExec;
+        if (mode & S_IWOTH)
+            perm |= Permissions.otherWrit;
+        if (mode & S_IROTH)
+            perm |= Permissions.otherRead;
+        if (mode & S_IXGRP)
+            perm |= Permissions.groupExec;
+        if (mode & S_IWGRP)
+            perm |= Permissions.groupWrit;
+        if (mode & S_IRGRP)
+            perm |= Permissions.groupRead;
+        if (mode & S_IXUSR)
+            perm |= Permissions.ownerExec;
+        if (mode & S_IWUSR)
+            perm |= Permissions.ownerWrit;
+        if (mode & S_IRUSR)
+            perm |= Permissions.ownerRead;
+        if (mode & S_ISUID)
+            perm |= Permissions.setUid;
+        if (mode & S_ISGID)
+            perm |= Permissions.setGid;
+        if (mode & S_ISVTX)
+            perm |= Permissions.sticky;
+        return perm;
+    }
+
+    mode_t permsToPosixMode(Permissions perm)
+    {
+        import core.sys.posix.sys.stat;
+
+        mode_t mode = 0;
+        if ((perm & Permissions.otherExec) != Permissions.none)
+            mode |= S_IXOTH;
+        if ((perm & Permissions.otherWrit) != Permissions.none)
+            mode |= S_IWOTH;
+        if ((perm & Permissions.otherRead) != Permissions.none)
+            mode |= S_IROTH;
+        if ((perm & Permissions.groupExec) != Permissions.none)
+            mode |= S_IXGRP;
+        if ((perm & Permissions.groupWrit) != Permissions.none)
+            mode |= S_IWGRP;
+        if ((perm & Permissions.groupRead) != Permissions.none)
+            mode |= S_IRGRP;
+        if ((perm & Permissions.ownerExec) != Permissions.none)
+            mode |= S_IXUSR;
+        if ((perm & Permissions.ownerWrit) != Permissions.none)
+            mode |= S_IWUSR;
+        if ((perm & Permissions.ownerRead) != Permissions.none)
+            mode |= S_IRUSR;
+        if ((perm & Permissions.setUid) != Permissions.none)
+            mode |= S_ISUID;
+        if ((perm & Permissions.setGid) != Permissions.none)
+            mode |= S_ISGID;
+        if ((perm & Permissions.sticky) != Permissions.none)
+            mode |= S_ISVTX;
+        return mode;
     }
 }
 
@@ -254,7 +324,7 @@ interface ArchiveExtractEntry : ArchiveEntry
                 import core.sys.posix.unistd : chown;
                 import std.string : toStringz;
 
-                chmod(toStringz(extractPath), cast(uint) this.permissions);
+                chmod(toStringz(extractPath), this.permissions.permsToPosixMode());
                 chown(toStringz(extractPath), this.ownerId, this.groupId);
             }
             break;
@@ -374,9 +444,7 @@ class FileArchiveEntry : ArchiveCreateEntry
         {
             ensureStat();
 
-            enum int mask = cast(int) Permissions.mask;
-
-            return cast(Permissions)(statStruct.st_mode & mask);
+            return statStruct.st_mode.posixModeToPerms() & Permissions.permMask;
         }
 
         @property int ownerId()
