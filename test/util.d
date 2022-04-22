@@ -240,7 +240,8 @@ unittest
 }
 
 /// Helper that writes a binary set of data to a file.
-void writeToFile(BR)(BR input, string filename)
+void writeToFile(I)(I input, string filename)
+if (isByteRange!I)
 {
     import std.stdio : File;
 
