@@ -1,6 +1,7 @@
 module squiz_box.tar;
 
 import squiz_box.core;
+import squiz_box.priv;
 
 import std.datetime.systime;
 import std.exception;
@@ -28,7 +29,7 @@ struct ArchiveTar
             string archivePath = absolutePath(f);
             archivePath = relativePath(archivePath, base);
             archivePath = buildNormalizedPath(archivePath);
-            entries ~= new ArchiveEntryFile(f, archivePath);
+            entries ~= new FileArchiveEntry(f, archivePath);
         }
         return entries;
     }
@@ -276,7 +277,7 @@ private class ArchiveTarReadEntry : ArchiveEntry
             _input.pos == _start,
             "Data cursor has moved, this entry is not valid anymore"
         );
-        return inputRangeObject(DataInputRange(_input, chunkSize, _end));
+        return inputRangeObject(DataInputByteRange(_input, chunkSize, _end));
     }
 }
 
