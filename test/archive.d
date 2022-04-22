@@ -4,6 +4,7 @@ import squiz_box.bz2;
 import squiz_box.core;
 import squiz_box.gz;
 import squiz_box.tar;
+import squiz_box.xz;
 
 import test.util;
 
@@ -73,7 +74,7 @@ unittest
     filesForArchive()
         .map!(p => fileEntryFromBase(p, base))
         .createTarArchive()
-        .writeToFile(archive.path);
+        .writeBinaryFile(archive.path);
 
     testArchiveContent(archive.path);
 
@@ -141,8 +142,7 @@ unittest
 
     mkdir(dm.path);
 
-    File(archive, "rb")
-        .byChunk(defaultChunkSize)
+    readBinaryFile(archive)
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
@@ -170,8 +170,7 @@ unittest
 
     mkdir(dm.path);
 
-    File(archive, "rb")
-        .byChunk(defaultChunkSize)
+    readBinaryFile(archive)
         .decompressGz()
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
@@ -200,9 +199,37 @@ unittest
 
     mkdir(dm.path);
 
-    File(archive, "rb")
-        .byChunk(defaultChunkSize)
+    readBinaryFile(archive)
         .decompressBz2()
+        .readTarArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
+    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
+    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
+
+    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
+    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
+    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+}
+
+@("Decompress and extract tar.xz")
+unittest
+{
+    import std.algorithm : each;
+    import std.conv : octal;
+    import std.digest : hexDigest;
+    import std.digest.sha : SHA1;
+    import std.file : mkdir, read;
+    import std.stdio : File;
+
+    const archive = testPath("data/archive.tar.xz");
+    const dm = DeleteMe("extraction_site", null);
+
+    mkdir(dm.path);
+
+    readBinaryFile(archive)
+        .decompressXz()
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 

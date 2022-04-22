@@ -158,7 +158,7 @@ unittest
     const size_t len = 1_203_960;
 
     generateLargeData(len, 1403, 127)
-        .writeToFile(dm.path);
+        .writeBinaryFile(dm.path);
 
     assert(getSize(dm.path) == len);
 }
@@ -234,22 +234,9 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some phrase to be repeated over and over.";
 
     generateRepetitiveData(len, phrase)
-        .writeToFile(dm.path);
+        .writeBinaryFile(dm.path);
 
     assert(getSize(dm.path) == len);
-}
-
-/// Helper that writes a binary set of data to a file.
-void writeToFile(I)(I input, string filename)
-if (isByteRange!I)
-{
-    import std.stdio : File;
-
-    auto file = File(filename, "wb");
-    foreach (chunk; input)
-    {
-        file.rawWrite(chunk);
-    }
 }
 
 /// Generate a unique name for temporary path (either dir or file)

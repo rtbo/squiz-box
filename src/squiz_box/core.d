@@ -44,6 +44,23 @@ static assert(isArchiveExtractEntryRange!(ArchiveExtractEntry[]));
 /// default chunk size for data exchanges and I/O operations
 enum defaultChunkSize = 8192;
 
+/// Helper that return a range of binary chunks of data from a file.
+auto readBinaryFile(string filename, size_t chunkSize = defaultChunkSize)
+{
+    import std.stdio : File;
+
+    return File(filename, "rb").byChunk(chunkSize);
+}
+
+/// Helper that eagerly writes binary chunks of data to a file.
+void writeBinaryFile(I)(I input, string filename) if (isByteRange!I)
+{
+    import std.algorithm : copy;
+    import std.stdio : File;
+
+    input.copy(File(filename, "wb").lockingBinaryWriter);
+}
+
 version (Posix)
 {
     import core.sys.posix.sys.types : mode_t;

@@ -3,6 +3,7 @@ module test.compress;
 import test.archive;
 import test.util;
 import squiz_box.bz2;
+import squiz_box.core;
 import squiz_box.gz;
 import squiz_box.xz;
 
@@ -50,7 +51,7 @@ unittest
         generateLargeData(len, 1239, 13, 8192)
             .filter!sha1
             .compressGz(6, 8192)
-            .writeToFile(dataGz.path);
+            .writeBinaryFile(dataGz.path);
 
         return sha.finish();
     })(len, dataGz.path, "compressGz", "sequential", "gzip");
@@ -77,7 +78,7 @@ unittest
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
             .compressGz(6, 8192)
-            .writeToFile(dataGz.path);
+            .writeBinaryFile(dataGz.path);
 
         return sha.finish();
     })(len, dataGz.path, "compressGz", "repetitive", "gzip");
@@ -97,7 +98,7 @@ unittest
 
     tarF.byChunk(bufSize)
         .compressBz2(bufSize)
-        .writeToFile(archive.path);
+        .writeBinaryFile(archive.path);
 
     tarF.close();
 
@@ -124,7 +125,7 @@ unittest
         generateLargeData(len, 1239, 13, 8192)
             .filter!sha1
             .compressBz2(8192)
-            .writeToFile(dm.path);
+            .writeBinaryFile(dm.path);
 
         return sha.finish();
     })(len, dm.path, "compressBz2", "sequential", "bzip2");
@@ -143,7 +144,7 @@ unittest
     const len = 5*1000*1000;
 
     generateRepetitiveData(len, phrase, 8192)
-        .writeToFile("data");
+        .writeBinaryFile("data");
 
     testCompressData!({
         SHA1 sha;
@@ -155,7 +156,7 @@ unittest
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
             .compressBz2(8192)
-            .writeToFile(dm.path);
+            .writeBinaryFile(dm.path);
 
         return sha.finish();
     })(len, dm.path, "compressBz2", "repetitive", "bzip2");
@@ -205,7 +206,7 @@ unittest
         generateLargeData(len, 1239, 13, 8192)
             .filter!sha1
             .compressXz(6, 8192)
-            .writeToFile(dataXz.path);
+            .writeBinaryFile(dataXz.path);
 
         return sha.finish();
     })(len, dataXz.path, "compressXz", "sequential", "xz");
@@ -232,7 +233,7 @@ unittest
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
             .compressXz(6, 8192)
-            .writeToFile(dataXz.path);
+            .writeBinaryFile(dataXz.path);
 
         return sha.finish();
     })(len, dataXz.path, "compressXz", "repetitive", "xz");
