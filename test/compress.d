@@ -2,8 +2,21 @@ module test.compress;
 
 import test.archive;
 import test.util;
+import squiz_box.bz2;
 import squiz_box.gz;
 import squiz_box.xz;
+
+// used in place of DeleteMe if needed to inspect the file after
+struct Path
+{
+    this(string basename, string ext)
+    {
+        path = basename ~ ext;
+    }
+
+    string path;
+}
+
 
 @("Compress GZ tar")
 unittest
@@ -28,19 +41,13 @@ unittest
     testArchiveContent(archive.path);
 }
 
-struct Path
-{
-    string path;
-}
-
 @("Compress GZ sequential")
 unittest
 {
     import std.algorithm : filter;
     import std.digest.sha : SHA1;
 
-    //auto dataGz = DeleteMe("data", ".gz");
-    auto dataGz = Path("data.gz");
+    auto dataGz = DeleteMe("data", ".gz");
 
     const len = 1000 * 1000;
 
@@ -85,6 +92,84 @@ unittest
 
         return sha.finish();
     })(len, dataGz.path, "compressGz", "repetitive", "gzip");
+}
+
+@("Compress Bz2 tar")
+unittest
+{
+    import std.algorithm : copy;
+    import std.stdio : File;
+
+    auto archive = DeleteMe("archive", ".tar.bz2");
+
+    auto tarF = File(testPath("data/archive.tar"), "rb");
+
+    enum bufSize = 8192;
+
+    tarF.byChunk(bufSize)
+        .compressBz2(bufSize)
+        .writeToFile(archive.path);
+
+    tarF.close();
+
+    testArchiveContent(archive.path);
+}
+
+@("Compress Bz2 sequential")
+unittest
+{
+    import std.algorithm : filter;
+    import std.digest.sha : SHA1;
+
+    auto dm = DeleteMe("data", ".bz2");
+
+    const len = 1000 * 1000;
+
+    testCompressData!({
+        SHA1 sha;
+        bool sha1(ubyte[] bytes)
+        {
+            sha.put(bytes);
+            return true;
+        }
+        generateLargeData(len, 1239, 13, 8192)
+            .filter!sha1
+            .compressBz2(8192)
+            .writeToFile(dm.path);
+
+        return sha.finish();
+    })(len, dm.path, "compressBz2", "sequential", "bzip2");
+}
+
+@("Compress Bzip2 repetitive")
+unittest
+{
+    // Bzip2 is really inefficient with repetitive data, so I lower the volume for this one
+    import std.algorithm : filter;
+    import std.digest.sha : SHA1;
+
+    auto dm = Path("data", ".bz2");
+
+    const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
+    const len = 5*1000*1000;
+
+    generateRepetitiveData(len, phrase, 8192)
+        .writeToFile("data");
+
+    testCompressData!({
+        SHA1 sha;
+        bool sha1(ubyte[] bytes)
+        {
+            sha.put(bytes);
+            return true;
+        }
+        generateRepetitiveData(len, phrase, 8192)
+            .filter!sha1
+            .compressBz2(8192)
+            .writeToFile(dm.path);
+
+        return sha.finish();
+    })(len, dm.path, "compressBz2", "repetitive", "bzip2");
 }
 
 
