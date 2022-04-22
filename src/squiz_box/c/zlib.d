@@ -31,6 +31,17 @@ module squiz_box.c.zlib;
   (zlib format), rfc1951 (deflate format) and rfc1952 (gzip format).
 */
 
+version(Posix)
+{
+    import core.sys.posix.sys.types : off_t;
+}
+else
+{
+    alias off_t = long;
+}
+
+alias z_off_t = off_t;
+
 enum ZLIB_VERSION = "1.2.12";
 enum ZLIB_VERNUM = 0x12c0;
 enum ZLIB_VER_MAJOR = 1;
@@ -44,7 +55,7 @@ alias free_func = void function (void* opaque, void* address);
 struct internal_state;
 
 struct z_stream {
-    const ubyte *next_in;     /* next input byte */
+    const(ubyte)* next_in;     /* next input byte */
     uint     avail_in;  /* number of bytes available at next_in */
     ulong    total_in;  /* total number of input bytes read so far */
 
@@ -79,9 +90,9 @@ struct gz_header {
     ubyte   *extra;     /* pointer to extra field or Z_NULL if none */
     uint    extra_len;  /* extra field length (valid if extra != Z_NULL) */
     uint    extra_max;  /* space at extra (only when reading header) */
-    ubyte   *name;      /* pointer to zero-terminated file name or Z_NULL */
+    char    *name;      /* pointer to zero-terminated file name or Z_NULL */
     uint    name_max;   /* space at name (only when reading header) */
-    ubyte   *comment;   /* pointer to zero-terminated comment or Z_NULL */
+    char    *comment;   /* pointer to zero-terminated comment or Z_NULL */
     uint    comm_max;   /* space at comment (only when reading header) */
     int     hcrc;       /* true if there was or will be a header crc */
     int     done;       /* true when done reading gzip header (not used
@@ -184,9 +195,8 @@ extern (C) const(char)* zlibVersion ();
    is automatically made by deflateInit and inflateInit.
  */
 
-/*
 extern (C) int deflateInit (z_streamp strm, int level);
-
+/*
      Initializes the internal stream state for compression.  The fields
    zalloc, zfree and opaque must be initialized before by the caller.  If
    zalloc and zfree are set to Z_NULL, deflateInit updates them to use default
@@ -334,9 +344,8 @@ extern (C) int deflateEnd (z_streamp strm);
 */
 
 
-/*
 extern (C) int inflateInit (z_streamp strm);
-
+/*
      Initializes the internal stream state for decompression.  The fields
    next_in, avail_in, zalloc, zfree and opaque must be initialized before by
    the caller.  In the current version of inflate, the provided input is not
@@ -494,14 +503,13 @@ extern (C) int inflateEnd (z_streamp strm);
     The following functions are needed only in some special applications.
 */
 
-/*
 extern (C) int deflateInit2 (z_streamp strm,
                                      int  level,
                                      int  method,
                                      int  windowBits,
                                      int  memLevel,
                                      int  strategy);
-
+/*
      This is another version of deflateInit with more compression options.  The
    fields zalloc, zfree and opaque must be initialized before by the caller.
 
@@ -788,10 +796,9 @@ extern (C) int deflateSetHeader (z_streamp strm,
    stream state was inconsistent.
 */
 
-/*
 extern (C) int inflateInit2 (z_streamp strm,
                                      int  windowBits);
-
+/*
      This is another version of inflateInit with an extra parameter.  The
    fields next_in, avail_in, zalloc, zfree and opaque must be initialized
    before by the caller.
@@ -1259,9 +1266,8 @@ extern (C) int uncompress2 (ubyte *dest,   ulong *destLen,
 struct gzFile_s; /* semi-opaque gzip file descriptor */
 alias gzFile = gzFile_s*;
 
-/*
 extern (C) gzFile gzopen (const char *path, const char *mode);
-
+/*
      Open the gzip (.gz) file at path for reading and decompressing, or
    compressing and writing.  The mode parameter is as in fopen ("rb" or "wb")
    but can also include a compression level ("wb9") or a strategy: 'f' for
@@ -1502,10 +1508,9 @@ extern (C) int gzflush (gzFile file, int flush);
    degrade compression if called too often.
 */
 
-/*
 extern (C) z_off_t gzseek (gzFile file,
                                    z_off_t offset, int whence);
-
+/*
      Set the starting position to offset relative to whence for the next gzread
    or gzwrite on file.  The offset represents a number of bytes in the
    uncompressed data stream.  The whence parameter is defined as in lseek(2);
@@ -1529,9 +1534,8 @@ extern (C) int    gzrewind (gzFile file);
      gzrewind(file) is equivalent to (int)gzseek(file, 0L, SEEK_SET).
 */
 
-/*
 extern (C) z_off_t    gztell (gzFile file);
-
+/*
      Return the starting position for the next gzread or gzwrite on file.
    This position represents a number of bytes in the uncompressed data stream,
    and is zero when starting, even if appending or reading a gzip stream from
@@ -1540,9 +1544,8 @@ extern (C) z_off_t    gztell (gzFile file);
      gztell(file) is equivalent to gzseek(file, 0L, SEEK_CUR)
 */
 
-/*
 extern (C) z_off_t gzoffset (gzFile file);
-
+/*
      Return the current compressed (actual) read or write offset of file.  This
    offset includes the count of bytes that precede the gzip stream, for example
    when appending or when using gzdopen() for reading.  When reading, the
@@ -1668,10 +1671,9 @@ extern (C) ulong adler32_z (ulong adler, const(ubyte)* buf,
      Same as adler32(), but with a size_t length.
 */
 
-/*
 extern (C) ulong adler32_combine (ulong adler1, ulong adler2,
                                           z_off_t len2);
-
+/*
      Combine two Adler-32 checksums into one.  For two sequences of bytes, seq1
    and seq2 with lengths len1 and len2, Adler-32 checksums were calculated for
    each, adler1 and adler2.  adler32_combine() returns the Adler-32 checksum of
@@ -1704,9 +1706,8 @@ extern (C) ulong crc32_z (ulong crc, const(ubyte)* buf,
      Same as crc32(), but with a size_t length.
 */
 
-/*
 extern (C) ulong crc32_combine (ulong crc1, ulong crc2, z_off_t len2);
-
+/*
      Combine two CRC-32 check values into one.  For two sequences of bytes,
    seq1 and seq2 with lengths len1 and len2, CRC-32 check values were
    calculated for each, crc1 and crc2.  crc32_combine() returns the CRC-32
@@ -1714,9 +1715,8 @@ extern (C) ulong crc32_combine (ulong crc1, ulong crc2, z_off_t len2);
    len2.
 */
 
-/*
 extern (C) ulong crc32_combine_gen (z_off_t len2);
-
+/*
      Return the operator corresponding to length len2, to be used with
    crc32_combine_op().
 */
