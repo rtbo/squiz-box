@@ -9,6 +9,7 @@ squiz_src = files([
     'src/squiz_box/c/zlib.d',
 
     'src/squiz_box/core.d',
+    'src/squiz_box/gz.d',
     'src/squiz_box/tar.d',
     'src/squiz_box/xz.d',
 ])
@@ -20,7 +21,7 @@ squiz_lib = library('squiz-box', squiz_src,
     include_directories: squiz_inc,
 )
 
-squiz_deps = [xz_dep]
+squiz_deps = [xz_dep, zlib_dep]
 
 squiz_dep = declare_dependency(
     link_with: squiz_lib,
@@ -30,7 +31,7 @@ squiz_dep = declare_dependency(
 
 squiz_test_src = squiz_src + files([
     'test/archive.d',
-    'test/filter.d',
+    'test/compress.d',
     'test/main.d',
     'test/util.d',
 ])
