@@ -82,7 +82,7 @@ class FileDataInput : DataInput
 }
 
 /// Range based data input
-class ByteRangeDataInput(BR) : ByteInput if (isByteRange!BR)
+class ByteRangeDataInput(BR) : DataInput if (isByteRange!BR)
 {
     private BR _input;
     private size_t _pos;
@@ -93,14 +93,7 @@ class ByteRangeDataInput(BR) : ByteInput if (isByteRange!BR)
         _input = input;
 
         if (!_input.empty)
-            prime();
-    }
-
-    private void prime()
-    in (!_input.empty)
-    {
-        _chunk = _input.front;
-        _input.popFront();
+            _chunk = _input.front;
     }
 
     @property size_t pos()
@@ -110,7 +103,7 @@ class ByteRangeDataInput(BR) : ByteInput if (isByteRange!BR)
 
     @property bool eoi()
     {
-        return chunk.length == 0;
+        return _chunk.length == 0;
     }
 
     void ffw(size_t dist)
@@ -124,8 +117,12 @@ class ByteRangeDataInput(BR) : ByteInput if (isByteRange!BR)
             _pos += len;
             dist -= len;
 
-            if (_chunk.length == 0 && !_input.empty)
-                prime();
+            if (_chunk.length == 0)
+            {
+                _input.popFront();
+                if (!_input.empty)
+                    _chunk = _input.front;
+            }
         }
     }
 
@@ -145,9 +142,14 @@ class ByteRangeDataInput(BR) : ByteInput if (isByteRange!BR)
             filled += len;
             _chunk = _chunk[len .. $];
 
-            if (!_chunk.length && !_input.empty)
-                prime();
+            if (_chunk.length == 0)
+            {
+                _input.popFront();
+                if (!_input.empty)
+                    _chunk = _input.front;
+            }
         }
+        return buffer[0 .. filled];
     }
 }
 
