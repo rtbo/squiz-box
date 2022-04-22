@@ -148,7 +148,7 @@ unittest
     import std.algorithm : filter;
     import std.digest.sha : SHA1;
 
-    auto dm = Path("data", ".bz2");
+    auto dm = DeleteMe("data", ".bz2");
 
     const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
     const len = 5*1000*1000;
