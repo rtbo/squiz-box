@@ -5,6 +5,7 @@ import squiz_box.core;
 import squiz_box.priv;
 
 import std.exception;
+import std.typecons;
 
 enum BZ_RUN = 0;
 enum BZ_FLUSH = 1;
@@ -62,105 +63,50 @@ private string bzResultToString(int res)
     }
 }
 
-auto compressBz2(BR)(BR input, size_t chunkSize = 4096)
-        if (isByteRange!BR)
+auto compressBz2(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
-    return CompressBz2!BR(input, chunkSize);
+    CompressBz2Policy params;
+    return CompressDecompressAlgo!(I, CompressBz2Policy)(input, chunkSize, params);
 }
 
-private struct CompressBz2(BR) if (isByteRange!BR)
+private struct CompressBz2Policy
 {
-    import std.conv : to;
+    alias Stream = bz_stream;
 
-    private BR _input;
-    private bz_stream* _stream;
+    int blockSize100k = 9;
+    int verbosity = 0;
+    int workFactor = 0;
 
-    private ubyte[] _inChunk;
-
-    private ubyte[] _outBuffer;
-    private ubyte[] _outChunk;
-
-    private bool _ended;
-
-    this(BR input, size_t chunkSize)
+    static bz_stream* initialize(CompressBz2Policy params)
     {
-        _input = input;
-
-        // allocating on the heap to ensure the address never changes
-        // which would creates stream error;
-        _stream = new bz_stream;
-        _stream.bzalloc = &(gcAlloc!int);
-        _stream.bzfree = &gcFree;
-
-        _outBuffer = new ubyte[chunkSize];
+        auto stream = new bz_stream;
+        stream.bzalloc = &(gcAlloc!int);
+        stream.bzfree = &gcFree;
 
         const ret = BZ2_bzCompressInit(
-            _stream, 9, 0, 0);
+            stream, params.blockSize100k, params.verbosity, params.workFactor);
 
         enforce(
             ret == BZ_OK,
             "Could not initialize Bzip2 encoder: " ~ bzResultToString(ret)
         );
-
-        prime();
+        return stream;
     }
 
-    private void prime()
+    static Flag!"streamEnded" process(bz_stream* stream, bool inputEmpty)
     {
-        while (_outChunk.length < _outBuffer.length)
-        {
-            if (_inChunk.length == 0 && !_input.empty)
-                _inChunk = _input.front;
+        const action = inputEmpty ? BZ_FINISH : BZ_RUN;
+        const res = BZ2_bzCompress(stream, action);
 
-            _stream.next_in = _inChunk.ptr;
-            _stream.avail_in = cast(uint) _inChunk.length;
+        if (res == BZ_STREAM_END)
+            return Yes.streamEnded;
 
-            _stream.next_out = _outBuffer.ptr + _outChunk.length;
-            _stream.avail_out = cast(uint)(_outBuffer.length - _outChunk.length);
-
-            const action = _input.empty ? BZ_FINISH : BZ_RUN;
-
-            const res = BZ2_bzCompress(_stream, action);
-
-            const readIn = _inChunk.length - _stream.avail_in;
-            _inChunk = _inChunk[readIn .. $];
-
-            const outEnd = _outBuffer.length - _stream.avail_out;
-            _outChunk = _outBuffer[0 .. outEnd];
-
-            // popFront must be called at the end because it may invalidate
-            // inChunk with some ranges.
-            if (_inChunk.length == 0 && !_input.empty)
-                _input.popFront();
-
-            if (res == BZ_STREAM_END)
-            {
-                _ended = true;
-                break;
-            }
-
-            enforce(
-                (action == BZ_RUN && res == BZ_RUN_OK) ||
+        enforce(
+            (action == BZ_RUN && res == BZ_RUN_OK) ||
                 (action == BZ_FINISH && res == BZ_FINISH_OK),
                 "Bzip2 compress failed with code: " ~ bzResultToString(res)
-            );
-        }
-    }
+        );
 
-    @property bool empty()
-    {
-        return _outChunk.length == 0;
-    }
-
-    @property ubyte[] front()
-    {
-        return _outChunk;
-    }
-
-    void popFront()
-    {
-        _outChunk = null;
-        if (!_ended)
-            prime();
+        return No.streamEnded;
     }
 }

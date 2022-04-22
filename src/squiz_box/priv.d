@@ -200,3 +200,87 @@ struct DataInputByteRange
             _chunk = null;
     }
 }
+
+
+// Common algorithm for all compression/decompression functions.
+// I is a byte input range
+// P is at the same time Policy (static functions to initialize, and process stream)
+// and intial parameters (instance fields).
+// This common struct is made possible thanks to the great job of the zlib, bzip2 and lzma authors.
+// Zlib authors have defined an extremly versatile stream interface that bzip2 and lzma authors have reused.
+struct CompressDecompressAlgo(I, P)
+{
+    /// Byte input range (by chunks)
+    I input;
+    /// Processor stream (with common interface by zlib, bzip2 and lzma)
+    P.Stream* stream;
+
+    /// Byte chunk from the input, provided to the stream
+    ubyte[] inChunk;
+
+    /// Buffer used to read from stream
+    ubyte[] outBuffer;
+    /// Slice of the buffer that is valid for read out
+    ubyte[] outChunk;
+
+    /// Whether the end of stream was reported by the Policy
+    bool ended;
+
+    this(I input, size_t chunkSize, P params)
+    {
+        this.input = input;
+        outBuffer = new ubyte[chunkSize];
+        stream = P.initialize(params);
+        prime();
+    }
+
+    @property bool empty()
+    {
+        return outChunk.length == 0;
+    }
+
+    @property ubyte[] front()
+    {
+        return outChunk;
+    }
+
+    void popFront()
+    {
+        outChunk = null;
+        if (!ended)
+            prime();
+    }
+
+    private void prime()
+    {
+        while (outChunk.length < outBuffer.length)
+        {
+            if (inChunk.length == 0 && !input.empty)
+                inChunk = input.front;
+
+            stream.next_in = inChunk.ptr;
+            stream.avail_in = cast(typeof(stream.avail_in)) inChunk.length;
+
+            stream.next_out = outBuffer.ptr + outChunk.length;
+            stream.avail_out = cast(typeof(stream.avail_out))(outBuffer.length - outChunk.length);
+
+            const streamEnded = P.process(stream, input.empty);
+
+            const readIn = inChunk.length - stream.avail_in;
+            inChunk = inChunk[readIn .. $];
+
+            const outEnd = outBuffer.length - stream.avail_out;
+            outChunk = outBuffer[0 .. outEnd];
+
+            // popFront must be called at the end because it invalidates inChunk
+            if (inChunk.length == 0 && !input.empty)
+                input.popFront();
+
+            if (streamEnded)
+            {
+                ended = true;
+                break;
+            }
+        }
+    }
+}
