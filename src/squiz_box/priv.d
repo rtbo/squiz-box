@@ -2,17 +2,22 @@ module squiz_box.priv;
 
 package(squiz_box):
 
-import core.memory;
+import squiz_box.core : isByteRange;
+
 import std.traits : isIntegral;
 
 extern(C) void* gcAlloc(T)(void* opaque, T n, T m)
 if (isIntegral!T)
 {
+    import core.memory : GC;
+
     return GC.malloc(n*m);
 }
 
 extern(C) void gcFree(void* opaque, void* addr)
 {
+    import core.memory : GC;
+
     GC.free(addr);
 }
 
