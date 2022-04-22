@@ -259,30 +259,46 @@ interface ArchiveExtractEntry : ArchiveEntry
     }
 }
 
+/// Create a file entry from a file path, relative to a base.
+/// archiveBase must be a parent path from filename,
+/// such as the the path of the entry is filename, relative to archiveBase.
+ArchiveCreateEntry fileEntryFromBase(string filename, string archiveBase)
+{
+    import std.path : absolutePath, buildNormalizedPath, relativePath;
+    import std.string : startsWith;
+
+    const fn = buildNormalizedPath(absolutePath(filename));
+    const ab = buildNormalizedPath(absolutePath(archiveBase));
+
+    enforce(fn.startsWith(ab), "archiveBase is not a parent of filename");
+
+    const pathInArchive = relativePath(fn, ab);
+
+    return new FileArchiveEntry(filename, pathInArchive);
+}
+
 /// File based implementation of ArchiveCreateEntry.
 /// Used to create archives from files in the file system.
 class FileArchiveEntry : ArchiveCreateEntry
 {
-    import std.stdio : File;
-
     string filePath;
-    string archivePath;
-    File file;
+    string pathInArchive;
 
-    this(string filePath, string archivePath)
+    this(string filePath, string pathInArchive)
     {
-        import std.string : toStringz;
+        import std.algorithm : canFind;
         import std.file : exists;
+        import std.path : isAbsolute;
 
         enforce(exists(filePath), filePath ~ ": No such file or directory");
+        enforce(!isAbsolute(pathInArchive) && !pathInArchive.canFind(".."), "Potential archive bomb");
 
-        if (!archivePath)
+        if (!pathInArchive)
         {
-            archivePath = filePath;
+            pathInArchive = filePath;
         }
         this.filePath = filePath;
-        this.archivePath = archivePath;
-        this.file = File(filePath, "rb");
+        this.pathInArchive = pathInArchive;
     }
 
     @property EntryMode mode()
@@ -292,7 +308,7 @@ class FileArchiveEntry : ArchiveCreateEntry
 
     @property string path()
     {
-        return archivePath;
+        return pathInArchive;
     }
 
     @property EntryType type()
@@ -377,11 +393,8 @@ class FileArchiveEntry : ArchiveCreateEntry
 
     ByteRange byChunk(size_t chunkSize)
     {
-        return inputRangeObject(file.byChunk(chunkSize));
-    }
+        import std.stdio : File;
 
-    ubyte[] read(ubyte[] buffer)
-    {
-        return file.rawRead(buffer);
+        return inputRangeObject(File(filePath, "rb").byChunk(chunkSize));
     }
 }
