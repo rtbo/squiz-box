@@ -43,23 +43,24 @@ if (isByteRange!BR)
 
         while(_outChunk.length < _outBuffer.length)
         {
+            import std.stdio;
+
             if (_inChunk.length == 0 && !_input.empty)
                 _inChunk = _input.front;
 
             _stream.next_in = _inChunk.ptr;
             _stream.avail_in = _inChunk.length;
-            _stream.total_in = 0;
 
             _stream.next_out = _outBuffer.ptr + _outChunk.length;
             _stream.avail_out = _outBuffer.length - _outChunk.length;
-            _stream.total_out = 0;
 
             const action = _input.empty ? lzma_action.FINISH : lzma_action.RUN;
             const res = lzma_code(&_stream, action);
 
-            _inChunk = _inChunk[_stream.total_in .. $];
+            const readIn = _inChunk.length - _stream.avail_in;
+            _inChunk = _inChunk[readIn .. $];
 
-            const outEnd = _outChunk.length + _stream.total_out;
+            const outEnd = _outBuffer.length - _stream.avail_out;
             _outChunk = _outBuffer[0 .. outEnd];
 
             // popFront must be called at the end because it may invalidate
