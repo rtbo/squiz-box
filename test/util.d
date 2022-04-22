@@ -61,6 +61,19 @@ struct Path
     string path;
 }
 
+version (Posix)
+{
+    Permissions getPermissions(string filePath)
+    {
+        import core.sys.posix.sys.stat : stat, stat_t;
+        import std.exception : errnoEnforce;
+        import std.string : toStringz;
+
+        stat_t stat_s = void;
+        errnoEnforce(stat(filePath.toStringz(), &stat_s) == 0);
+        return posixModeToPerms(stat_s.st_mode);
+    }
+}
 
 /// Return a byte range that generates potentially very large amount of binary data.
 /// The data contains _num_ bytes in the form of 64 bits integers,
@@ -246,7 +259,7 @@ void writeToFile(BR)(BR input, string filename)
 /// Returns: a path (i.e. location/prefix-{uniquestring}.ext)
 string tempPath(string location = null, string prefix = null, string ext = null)
 in (!location || (exists(location) && isDir(location)))
-in (!ext || ext.startsWith('.'))
+in (!ext.length || ext.startsWith('.'))
 out (res; (!location || res.startsWith(location)) && !exists(res))
 {
     import std.array : array;

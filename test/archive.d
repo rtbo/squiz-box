@@ -123,3 +123,32 @@ unittest
 
     assert(readEntries.equal(expectedEntries));
 }
+
+@("Extract Tar")
+unittest
+{
+    import std.algorithm : each;
+    import std.conv : octal;
+    import std.digest : hexDigest;
+    import std.digest.sha : SHA1;
+    import std.file : mkdir, read;
+    import std.stdio : File;
+
+    const archive = testPath("data/archive.tar");
+    const dm = DeleteMe("extraction_site", null);
+
+    mkdir(dm.path);
+
+    File(archive, "rb")
+        .byChunk(defaultChunkSize)
+        .readTarArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
+    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
+    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
+
+    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
+    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
+    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+}
