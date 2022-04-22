@@ -13,6 +13,12 @@ string[] filesForArchive()
     ];
 }
 
+shared static this()
+{
+    import std.process;
+    execute(["chmod", "666", testPath("data/folder/chmod 666.txt")]);
+}
+
 void testArchiveContent(string archivePath)
 {
     import std.algorithm : canFind;
