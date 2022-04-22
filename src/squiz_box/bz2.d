@@ -1,7 +1,8 @@
 module squiz_box.bz2;
 
-import squiz_box.core;
 import squiz_box.c.bzip2;
+import squiz_box.core;
+import squiz_box.priv;
 
 import std.exception;
 
@@ -88,6 +89,8 @@ private struct CompressBz2(BR) if (isByteRange!BR)
         // allocating on the heap to ensure the address never changes
         // which would creates stream error;
         _stream = new bz_stream;
+        _stream.bzalloc = &(gcAlloc!int);
+        _stream.bzfree = &gcFree;
 
         _outBuffer = new ubyte[chunkSize];
 
@@ -137,7 +140,8 @@ private struct CompressBz2(BR) if (isByteRange!BR)
             }
 
             enforce(
-                action == BZ_RUN && res == BZ_RUN_OK || action == BZ_FINISH && res == BZ_FINISH_OK,
+                (action == BZ_RUN && res == BZ_RUN_OK) ||
+                (action == BZ_FINISH && res == BZ_FINISH_OK),
                 "Bzip2 compress failed with code: " ~ bzResultToString(res)
             );
         }

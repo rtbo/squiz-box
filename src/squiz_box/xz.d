@@ -1,7 +1,8 @@
 module squiz_box.xz;
 
-import squiz_box.core;
 import squiz_box.c.lzma;
+import squiz_box.core;
+import squiz_box.priv;
 
 import std.exception;
 
@@ -19,6 +20,7 @@ if (isByteRange!BR)
     private BR _input;
     private uint _level;
     private lzma_stream _stream;
+    private lzma_allocator* _alloc;
 
     private ubyte[] _inChunk;
 
@@ -31,6 +33,11 @@ if (isByteRange!BR)
         _level = level;
 
         _outBuffer = new ubyte[chunkSize];
+
+        _alloc = new lzma_allocator;
+        _alloc.alloc = &(gcAlloc!size_t);
+        _alloc.free = &gcFree;
+        _stream.allocator = _alloc;
 
         const ret = lzma_easy_encoder(&_stream, level, lzma_check.CRC64);
         enforce(ret == lzma_ret.OK, "Could not initialize LZMA encoder: " ~ ret.to!string);

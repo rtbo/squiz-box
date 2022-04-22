@@ -35,8 +35,8 @@ struct bz_stream
 
     void* state;
 
-    void* function(void*, int, int) bzalloc;
-    void function(void*, void*) bzfree;
+    extern (C) void* function(void*, int, int) bzalloc;
+    extern (C) void function(void*, void*) bzfree;
 
     void* opaque;
 }

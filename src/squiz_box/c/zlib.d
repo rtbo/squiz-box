@@ -49,8 +49,8 @@ enum ZLIB_VER_MINOR = 2;
 enum ZLIB_VER_REVISION = 12;
 enum ZLIB_VER_SUBREVISION = 0;
 
-alias alloc_func = void* function (void* opaque, uint items, uint size);
-alias free_func = void function (void* opaque, void* address);
+alias alloc_func = extern(C) void* function (void* opaque, uint items, uint size);
+alias free_func = extern(C) void function (void* opaque, void* address);
 
 struct internal_state;
 

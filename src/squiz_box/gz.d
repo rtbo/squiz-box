@@ -1,7 +1,8 @@
 module squiz_box.gz;
 
-import squiz_box.core;
 import squiz_box.c.zlib;
+import squiz_box.core;
+import squiz_box.priv;
 
 import std.exception;
 
@@ -115,6 +116,8 @@ private struct CompressGz(BR) if (isByteRange!BR)
         // allocating on the heap to ensure the address never changes
         // which would creates stream error;
         _stream = new z_stream;
+        _stream.zalloc = &(gcAlloc!uint);
+        _stream.zfree = &gcFree;
 
         _outBuffer = new ubyte[chunkSize];
 

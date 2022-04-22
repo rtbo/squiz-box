@@ -69,8 +69,8 @@ enum lzma_action
 
 struct lzma_allocator
 {
-    void* function(void* opaque, size_t nmemb, size_t size) alloc;
-    void function(void* opaque, void* ptr) free;
+    extern (C) void* function(void* opaque, size_t nmemb, size_t size) alloc;
+    extern (C) void function(void* opaque, void* ptr) free;
     void* opaque;
 }
 
