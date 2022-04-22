@@ -59,7 +59,7 @@ void testArchiveContent(string archivePath)
 
 }
 
-@("Create tar")
+@("Create Tar")
 unittest
 {
     import std.algorithm : map, sum;
@@ -81,12 +81,17 @@ unittest
     assert(content[$ - 1024 .. $].sum() == 0);
 }
 
-@("Read tar")
+@("Read Tar")
 unittest
 {
+    import std.algorithm : equal, map;
+    import std.array : array;
     import std.conv : octal;
     import std.digest.sha : SHA1;
     import std.digest : hexDigest;
+    import std.stdio : File;
+
+    const path = testPath("data/archive.tar");
 
     struct Entry
     {
@@ -96,26 +101,25 @@ unittest
         char[40] sha1;
     }
 
-    const expected = [
+    const expectedEntries = [
         Entry("file1.txt", octal!"644", 7, "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC"),
         Entry("file 2.txt", octal!"644", 3521, "01FA4C5C29A58449EEF1665658C48C0D7829C45F"),
         Entry("folder/chmod 666.txt", octal!"666", 26, "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3"),
     ];
 
-    auto archive = ArchiveTar.readFromPath(testPath("data/archive.tar"));
+    const readEntries = File(path, "rb")
+        .byChunk(defaultChunkSize)
+        .readTarArchive()
+        .map!((entry) {
+            const content = entry.readContent();
+            return Entry (
+                entry.path,
+                entry.permissions,
+                entry.size,
+                hexDigest!SHA1(content)
+            );
+        })
+        .array;
 
-    Entry[] entries;
-    foreach (entry; archive.entries)
-    {
-        const content = entry.readContent;
-
-        entries ~= Entry(
-            entry.path,
-            entry.permissions,
-            entry.size,
-            hexDigest!SHA1(content)
-        );
-    }
-
-    assert(entries == expected);
+    assert(readEntries.equal(expectedEntries));
 }

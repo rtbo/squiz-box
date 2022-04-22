@@ -6,8 +6,7 @@ import squiz_box.priv;
 import std.datetime.systime;
 import std.exception;
 import std.path;
-
-import std.stdio;
+import std.range.primitives;
 
 /// Returns a Tar archive as a byte range
 /// corresponding to the entries in input.
@@ -137,52 +136,18 @@ private struct TarArchiveCreate(I)
     }
 }
 
-struct ArchiveTar
+static assert(isByteRange!(TarArchiveCreate!(ArchiveCreateEntry[])));
+
+/// Return a range of entries from a Tar formatted byte range
+auto readTarArchive(I)(I tarInput)
+if (isByteRange!I)
 {
-    static ArchiveTarRead readFromPath(string archivePath)
-    {
-        return ArchiveTarRead(archivePath);
-    }
+    auto dataInput = new ByteRangeDataInput!I(tarInput);
+    return ArchiveTarRead(dataInput);
 }
 
-struct ArchiveTarRead
-{
-    private string archivePath;
 
-    this(string archivePath)
-    {
-        import std.file : exists, isFile;
-
-        enforce(
-            exists(archivePath) && isFile(archivePath),
-            archivePath ~ ": No such file",
-        );
-
-        this.archivePath = archivePath;
-    }
-
-    @property auto entries()
-    {
-        import std.stdio : File;
-
-        auto input = new FileDataInput(File(archivePath, "rb"));
-        return ArchiveTarReadEntries(input);
-    }
-
-    void extractTo(string directory)
-    {
-        import std.file : exists, isDir;
-
-        enforce(exists(directory) && isDir(directory));
-
-        foreach (entry; entries)
-        {
-            entry.extractTo(directory);
-        }
-    }
-}
-
-private struct ArchiveTarReadEntries
+private struct ArchiveTarRead
 {
     private DataInput _input;
 
@@ -269,11 +234,15 @@ private struct ArchiveTarReadEntries
             data.permissions = cast(Permissions) parseOctalString(th.mode);
         }
 
-        _entry = new ArchiveTarReadEntry(_input, data);
+        _entry = new ArchiveTarExtractEntry(_input, data);
+        import std.stdio;
+        writeln("read entry: ", _entry);
 
         _next = next512(_input.pos + data.size);
     }
 }
+
+static assert (isArchiveExtractEntryRange!ArchiveTarRead);
 
 private struct EntryData
 {
@@ -291,7 +260,7 @@ private struct EntryData
     }
 }
 
-private class ArchiveTarReadEntry : ArchiveExtractEntry
+private class ArchiveTarExtractEntry : ArchiveExtractEntry
 {
     import std.stdio : File;
 
