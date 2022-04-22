@@ -4,7 +4,7 @@ import std.datetime.systime;
 import std.exception;
 import std.range.interfaces;
 
-/// An input range of chunks of bytes
+/// A dynamic type of input range of chunks of bytes
 alias ByteRange = InputRange!(ubyte[]);
 
 /// Static check that a type is a byte range.
@@ -20,6 +20,26 @@ template isByteRange(BR)
 }
 
 static assert(isByteRange!ByteRange);
+
+/// Static check that a type is an InputRange of ArchiveCreateEntry
+template isArchiveCreateEntryRange(AER)
+{
+    import std.range : ElementType, isInputRange;
+
+    enum isArchiveCreateEntryRange = isInputRange!AER && is(ElementType!AER : ArchiveCreateEntry);
+}
+
+static assert(isArchiveCreateEntryRange!(ArchiveCreateEntry[]));
+
+/// Static check that a type is an InputRange of ArchiveExtractEntry
+template isArchiveExtractEntryRange(AER)
+{
+    import std.range : ElementType, isInputRange;
+
+    enum isArchiveExtractEntryRange = isInputRange!AER && is(ElementType!AER : ArchiveExtractEntry);
+}
+
+static assert(isArchiveExtractEntryRange!(ArchiveExtractEntry[]));
 
 version (Posix)
 {
@@ -47,33 +67,96 @@ version (Posix)
     }
 }
 
+/// Type of an archive entry
 enum EntryType
 {
+    /// Regular file
     regular,
+    /// Directory
     directory,
+    /// Symlink
     symlink,
 }
 
+/// Describe in what archive mode an entry is for.
+enum EntryMode
+{
+    /// Entry is used for archive creation
+    creation,
+    /// Entry is used for archive extraction
+    extraction,
+}
+
+/// Common interface to archive entry.
+/// Each type implementing ArchiveEntry is either for creation or for extraction, but not both.
+/// Entries for archive creation MUST implement ArchiveCreateEntry.
+/// Entries for archive extraction MUST implement ArchiveExtractionEntry.
+///
+/// Instances of ArchiveCreateEntry are typically instanciated directly by the user or by thin helpers (e.g. FileArchiveEntry)
+/// Instances of ArchiveExtractEntry are instantiated by the extraction algorithm and their final type is hidden.
 interface ArchiveEntry
 {
+    /// Tell whether the entry is used for creation (ArchiveCreateEntry)
+    /// or extraction (ArchiveExtractEntry)
+    @property EntryMode mode();
+
+    /// The archive mode this entry is for.
+    /// The path of the entry within the archive.
+    /// Should always be a relative path, and never go backward (..)
     @property string path();
 
+    /// The type of entry (directory, file, symlink)
     @property EntryType type();
 
+    /// If symlink, this is the path pointed to by the link (relative to the symlink).
+    /// For directories and regular file, returns null.
     @property string linkname();
 
+    /// The size of the entry in bytes (returns zero for directories and symlink)
+    /// This is the size of uncompressed, extracted data.
     @property size_t size();
+
+    /// The timeLastModified of the entry
     @property SysTime timeLastModified();
 
     version (Posix)
     {
+        /// The posix permissions of the entry
         @property Permissions permissions();
+        /// The owner id of the entry
         @property int ownerId();
+        /// The group id of the entry
         @property int groupId();
     }
 
+    /// Check if the entry is a potential bomb.
+    /// A bomb is typically an entry that may overwrite other files
+    /// outside of the extraction directory.
+    /// isBomb will return true if the path is an absolute path
+    /// or a relative path going backwards (containing '..' after normalization).
+    /// In addition, a criteria of maximum allowed size can be provided (by default all sizes are accepted).
+    final bool isBomb(size_t allowedSz = size_t.max)
+    {
+        import std.path : buildNormalizedPath, isAbsolute;
+        import std.string : startsWith;
+
+        if (allowedSz != size_t.max && size > allowedSz)
+            return true;
+
+        const p = path;
+        return isAbsolute(p) || buildNormalizedPath(p).startsWith("..");
+    }
+}
+
+/// Interface of ArchiveEntry used to create archives
+interface ArchiveCreateEntry : ArchiveEntry
+{
+    /// A byte range to the content of the entry.
+    /// Only relevant for regular files.
+    /// Other types of entry will return an empty range.
     ByteRange byChunk(size_t chunkSize = 4096);
 
+    /// Helper function that read the complete data of the entry (using byChunk).
     final ubyte[] readContent()
     {
         ubyte[] result = new ubyte[size];
@@ -88,21 +171,33 @@ interface ArchiveEntry
 
         return result;
     }
+}
 
-    /// Check if the entry is a potential bomb.
-    /// A bomb is typically an entry that may overwrite other files
-    /// outside of the extraction directory.
-    /// In addition, a criteria of maximum allowed size can be provided (by default all sizes are accepted).
-    final bool isBomb(size_t allowedSz = size_t.max)
+/// Interface of ArchiveEntry used for archive extraction
+interface ArchiveExtractEntry : ArchiveEntry
+{
+    /// The size occupied by the entry in the archive.
+    @property size_t entrySize();
+
+    /// A byte range to the content of the entry.
+    /// Only relevant for regular files.
+    /// Other types of entry will return an empty range.
+    ByteRange byChunk(size_t chunkSize = 4096);
+
+    /// Helper function that read the complete data of the entry (using byChunk).
+    final ubyte[] readContent()
     {
-        import std.path : buildNormalizedPath, isAbsolute;
-        import std.string : startsWith;
+        ubyte[] result = new ubyte[size];
+        size_t offset;
 
-        if (allowedSz != size_t.max && size > allowedSz)
-            return true;
+        foreach (chunk; byChunk())
+        {
+            assert(offset + chunk.length <= result.length);
+            result[offset .. offset + chunk.length] = chunk;
+            offset += chunk.length;
+        }
 
-        const p = path;
-        return isAbsolute(p) || buildNormalizedPath(p).startsWith("..");
+        return result;
     }
 
     /// Extract the entry to a file under the given base directory
@@ -164,10 +259,9 @@ interface ArchiveEntry
     }
 }
 
-/// File based implementation of ArchiveEntry.
-/// This is used primarily as input for archive creation
-/// from files in the filesystem.
-class FileArchiveEntry : ArchiveEntry
+/// File based implementation of ArchiveCreateEntry.
+/// Used to create archives from files in the file system.
+class FileArchiveEntry : ArchiveCreateEntry
 {
     import std.stdio : File;
 
@@ -189,6 +283,11 @@ class FileArchiveEntry : ArchiveEntry
         this.filePath = filePath;
         this.archivePath = archivePath;
         this.file = File(filePath, "rb");
+    }
+
+    @property EntryMode mode()
+    {
+        return EntryMode.creation;
     }
 
     @property string path()

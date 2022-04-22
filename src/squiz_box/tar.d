@@ -17,13 +17,13 @@ struct ArchiveTar
         return ArchiveTarCreate(entries);
     }
 
-    private static ArchiveEntry[] makeEntries(F)(F files, string baseDir)
+    private static ArchiveCreateEntry[] makeEntries(F)(F files, string baseDir)
     {
         import std.file : getcwd;
 
         string base = baseDir ? baseDir : getcwd();
 
-        ArchiveEntry[] entries;
+        ArchiveCreateEntry[] entries;
         foreach (f; files)
         {
             string archivePath = absolutePath(f);
@@ -42,7 +42,7 @@ struct ArchiveTar
 
 struct ArchiveTarCreate
 {
-    private ArchiveEntry[] entries;
+    private ArchiveCreateEntry[] entries;
 
     auto byChunk(size_t chunkSz = 4096)
     in (chunkSz % 512 == 0, "chunk size must be a multiple of 512")
@@ -63,243 +63,25 @@ struct ArchiveTarCreate
     }
 }
 
-struct ArchiveTarRead
-{
-    private string archivePath;
-
-    this(string archivePath)
-    {
-        import std.file : exists, isFile;
-
-        enforce(
-            exists(archivePath) && isFile(archivePath),
-            archivePath ~ ": No such file",
-        );
-
-        this.archivePath = archivePath;
-    }
-
-    @property auto entries()
-    {
-        import std.stdio : File;
-
-        auto input = new FileDataInput(File(archivePath, "rb"));
-        return ArchiveTarReadEntries(input);
-    }
-
-    void extractTo(string directory)
-    {
-        import std.file : exists, isDir;
-
-        enforce(exists(directory) && isDir(directory));
-
-        foreach (entry; entries)
-        {
-            entry.extractTo(directory);
-        }
-    }
-}
-
-private struct ArchiveTarReadEntries
-{
-    private DataInput _input;
-
-    // current header data
-    private size_t _next;
-    private ubyte[] _block;
-    private ArchiveEntry _entry;
-
-    this(DataInput input)
-    {
-        _input = input;
-        _block = new ubyte[512];
-
-        // file with zero bytes is a valid tar file
-        if (!_input.eoi)
-            readHeaderBlock();
-    }
-
-    @property bool empty()
-    {
-        return _input.eoi;
-    }
-
-    @property ArchiveEntry front()
-    {
-        return _entry;
-    }
-
-    void popFront()
-    {
-        assert(_input.pos <= _next);
-
-        if (_input.pos < _next)
-        {
-            // the current entry was not fully read, we move the stream forward
-            // up to the next header
-            const dist = _next - _input.pos;
-            _input.ffw(dist);
-        }
-        readHeaderBlock();
-    }
-
-    private void readHeaderBlock()
-    {
-        import std.conv : to;
-
-        enforce(_input.read(_block).length == 512, "Unexpected end of input");
-
-        TarHeader* th = cast(TarHeader*) _block.ptr;
-
-        const computed = th.unsignedChecksum();
-        const checksum = parseOctalString(th.chksum);
-
-        if (computed == 256 && checksum == 0)
-        {
-            // this is an empty header (only zeros)
-            // indicates end of archive
-
-            while (!_input.eoi)
-            {
-                _input.ffw(512);
-            }
-            return;
-        }
-
-        enforce(
-            checksum == computed,
-            "Invalid TAR checksum at 0x" ~ (
-                _input.pos - 512 + th.chksum.offsetof).to!string(
-                16) ~
-                "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
-        );
-
-        EntryData data;
-        data.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
-        data.type = toEntryType(th.typeflag);
-        data.linkname = parseString(th.linkname).idup;
-        data.size = parseOctalString!size_t(th.size);
-        data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
-        version (Posix)
-        {
-            data.ownerId = parseOctalString(th.uid);
-            data.groupId = parseOctalString(th.gid);
-            data.permissions = cast(Permissions) parseOctalString(th.mode);
-        }
-
-        _entry = new ArchiveTarReadEntry(_input, data);
-
-        _next = next512(_input.pos + data.size);
-    }
-}
-
-private struct EntryData
-{
-    string path;
-    string linkname;
-    EntryType type;
-    size_t size;
-    SysTime timeLastModified;
-
-    version (Posix)
-    {
-        int ownerId;
-        int groupId;
-        Permissions permissions;
-    }
-}
-
-private class ArchiveTarReadEntry : ArchiveEntry
-{
-    import std.stdio : File;
-
-    private DataInput _input;
-    private size_t _start;
-    private size_t _end;
-    private EntryData _data;
-
-    this(DataInput input, EntryData data)
-    {
-        _input = input;
-        _start = input.pos;
-        _end = _start + data.size;
-        _data = data;
-    }
-
-    @property string path()
-    {
-        return _data.path;
-    }
-
-    @property EntryType type()
-    {
-        return _data.type;
-    }
-
-    @property string linkname()
-    {
-        return _data.linkname;
-    }
-
-    @property size_t size()
-    {
-        return _data.size;
-    }
-
-    @property SysTime timeLastModified()
-    {
-        return _data.timeLastModified;
-    }
-
-    version (Posix)
-    {
-        @property Permissions permissions()
-        {
-            return _data.permissions;
-        }
-
-        @property int ownerId()
-        {
-            return _data.ownerId;
-        }
-
-        @property int groupId()
-        {
-            return _data.groupId;
-        }
-    }
-
-    ByteRange byChunk(size_t chunkSize)
-    {
-        import std.range.interfaces : inputRangeObject;
-
-        enforce (
-            _input.pos == _start,
-            "Data cursor has moved, this entry is not valid anymore"
-        );
-        return inputRangeObject(DataInputByteRange(_input, chunkSize, _end));
-    }
-}
-
 private struct ArchiveTarCreateByChunk
 {
     // init data
     ubyte[] buffer;
-    ArchiveEntry[] remainingEntries;
+    ArchiveCreateEntry[] remainingEntries;
 
     // current chunk (front data)
     ubyte[] chunk; // data ready
     ubyte[] avail; // space available in buffer (after chunk)
 
     // current entry being processed
-    ArchiveEntry entry;
+    ArchiveCreateEntry entry;
     ByteRange entryChunk;
 
     // footer is two empty blocks
     size_t footer;
     enum footerLen = 1024;
 
-    this(size_t bufSize, ArchiveEntry[] entries)
+    this(size_t bufSize, ArchiveCreateEntry[] entries)
     {
         enforce(bufSize % 512 == 0, "buffer size must be a multiple of 512");
         buffer = new ubyte[bufSize];
@@ -396,6 +178,235 @@ private struct ArchiveTarCreateByChunk
                 avail = avail[pad .. $];
             }
         }
+    }
+}
+
+struct ArchiveTarRead
+{
+    private string archivePath;
+
+    this(string archivePath)
+    {
+        import std.file : exists, isFile;
+
+        enforce(
+            exists(archivePath) && isFile(archivePath),
+            archivePath ~ ": No such file",
+        );
+
+        this.archivePath = archivePath;
+    }
+
+    @property auto entries()
+    {
+        import std.stdio : File;
+
+        auto input = new FileDataInput(File(archivePath, "rb"));
+        return ArchiveTarReadEntries(input);
+    }
+
+    void extractTo(string directory)
+    {
+        import std.file : exists, isDir;
+
+        enforce(exists(directory) && isDir(directory));
+
+        foreach (entry; entries)
+        {
+            entry.extractTo(directory);
+        }
+    }
+}
+
+private struct ArchiveTarReadEntries
+{
+    private DataInput _input;
+
+    // current header data
+    private size_t _next;
+    private ubyte[] _block;
+    private ArchiveExtractEntry _entry;
+
+    this(DataInput input)
+    {
+        _input = input;
+        _block = new ubyte[512];
+
+        // file with zero bytes is a valid tar file
+        if (!_input.eoi)
+            readHeaderBlock();
+    }
+
+    @property bool empty()
+    {
+        return _input.eoi;
+    }
+
+    @property ArchiveExtractEntry front()
+    {
+        return _entry;
+    }
+
+    void popFront()
+    {
+        assert(_input.pos <= _next);
+
+        if (_input.pos < _next)
+        {
+            // the current entry was not fully read, we move the stream forward
+            // up to the next header
+            const dist = _next - _input.pos;
+            _input.ffw(dist);
+        }
+        readHeaderBlock();
+    }
+
+    private void readHeaderBlock()
+    {
+        import std.conv : to;
+
+        enforce(_input.read(_block).length == 512, "Unexpected end of input");
+
+        TarHeader* th = cast(TarHeader*) _block.ptr;
+
+        const computed = th.unsignedChecksum();
+        const checksum = parseOctalString(th.chksum);
+
+        if (computed == 256 && checksum == 0)
+        {
+            // this is an empty header (only zeros)
+            // indicates end of archive
+
+            while (!_input.eoi)
+            {
+                _input.ffw(512);
+            }
+            return;
+        }
+
+        enforce(
+            checksum == computed,
+            "Invalid TAR checksum at 0x" ~ (
+                _input.pos - 512 + th.chksum.offsetof).to!string(
+                16) ~
+                "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
+        );
+
+        EntryData data;
+        data.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
+        data.type = toEntryType(th.typeflag);
+        data.linkname = parseString(th.linkname).idup;
+        data.size = parseOctalString!size_t(th.size);
+        data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
+        version (Posix)
+        {
+            data.ownerId = parseOctalString(th.uid);
+            data.groupId = parseOctalString(th.gid);
+            data.permissions = cast(Permissions) parseOctalString(th.mode);
+        }
+
+        _entry = new ArchiveTarReadEntry(_input, data);
+
+        _next = next512(_input.pos + data.size);
+    }
+}
+
+private struct EntryData
+{
+    string path;
+    string linkname;
+    EntryType type;
+    size_t size;
+    SysTime timeLastModified;
+
+    version (Posix)
+    {
+        int ownerId;
+        int groupId;
+        Permissions permissions;
+    }
+}
+
+private class ArchiveTarReadEntry : ArchiveExtractEntry
+{
+    import std.stdio : File;
+
+    private DataInput _input;
+    private size_t _start;
+    private size_t _end;
+    private EntryData _data;
+
+    this(DataInput input, EntryData data)
+    {
+        _input = input;
+        _start = input.pos;
+        _end = _start + data.size;
+        _data = data;
+    }
+
+    @property EntryMode mode()
+    {
+        return EntryMode.extraction;
+    }
+
+    @property string path()
+    {
+        return _data.path;
+    }
+
+    @property EntryType type()
+    {
+        return _data.type;
+    }
+
+    @property string linkname()
+    {
+        return _data.linkname;
+    }
+
+    @property size_t size()
+    {
+        return _data.size;
+    }
+
+    @property size_t entrySize()
+    {
+        // size taken by the header block + 512 bytes aligned content
+        return 512 + next512(_data.size);
+    }
+
+    @property SysTime timeLastModified()
+    {
+        return _data.timeLastModified;
+    }
+
+    version (Posix)
+    {
+        @property Permissions permissions()
+        {
+            return _data.permissions;
+        }
+
+        @property int ownerId()
+        {
+            return _data.ownerId;
+        }
+
+        @property int groupId()
+        {
+            return _data.groupId;
+        }
+    }
+
+    ByteRange byChunk(size_t chunkSize)
+    {
+        import std.range.interfaces : inputRangeObject;
+
+        enforce (
+            _input.pos == _start,
+            "Data cursor has moved, this entry is not valid anymore"
+        );
+        return inputRangeObject(DataInputByteRange(_input, chunkSize, _end));
     }
 }
 
