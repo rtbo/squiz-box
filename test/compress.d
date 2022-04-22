@@ -6,17 +6,6 @@ import squiz_box.bz2;
 import squiz_box.gz;
 import squiz_box.xz;
 
-// used in place of DeleteMe if needed to inspect the file after
-struct Path
-{
-    this(string basename, string ext)
-    {
-        path = basename ~ ext;
-    }
-
-    string path;
-}
-
 
 @("Compress GZ tar")
 unittest

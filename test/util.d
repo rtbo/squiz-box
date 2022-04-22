@@ -11,6 +11,8 @@ string testPath(Args...)(Args args)
     return buildNormalizedPath(dirName(__FILE_FULL_PATH__), args);
 }
 
+/// Defines a path in a temporary location
+/// and delete the file or directory (recursively) at that path when going out of scope.
 struct DeleteMe
 {
     string path;
@@ -33,6 +35,18 @@ struct DeleteMe
         }
     }
 }
+
+// used in place of DeleteMe if needed to inspect the file after
+struct Path
+{
+    this(string basename, string ext)
+    {
+        path = basename ~ ext;
+    }
+
+    string path;
+}
+
 
 /// Return a byte range that generates potentially very large amount of binary data.
 /// The data contains _num_ bytes in the form of 64 bits integers,

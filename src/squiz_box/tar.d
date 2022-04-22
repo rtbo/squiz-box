@@ -9,65 +9,21 @@ import std.path;
 
 import std.stdio;
 
-struct ArchiveTar
+/// Returns a Tar archive as a byte range
+/// corresponding to the entries in input.
+/// chunkSize must be a multiple of 512.
+auto createTarArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
+if (isArchiveCreateEntryRange!I)
+in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
-    static ArchiveTarCreate createWithFiles(F)(F files, string baseDir = null)
-    {
-        auto entries = makeEntries(files, baseDir);
-        return ArchiveTarCreate(entries);
-    }
-
-    private static ArchiveCreateEntry[] makeEntries(F)(F files, string baseDir)
-    {
-        import std.file : getcwd;
-
-        string base = baseDir ? baseDir : getcwd();
-
-        ArchiveCreateEntry[] entries;
-        foreach (f; files)
-        {
-            string archivePath = absolutePath(f);
-            archivePath = relativePath(archivePath, base);
-            archivePath = buildNormalizedPath(archivePath);
-            entries ~= new FileArchiveEntry(f, archivePath);
-        }
-        return entries;
-    }
-
-    static ArchiveTarRead readFromPath(string archivePath)
-    {
-        return ArchiveTarRead(archivePath);
-    }
+    return TarArchiveCreate!I(entries, chunkSize);
 }
 
-struct ArchiveTarCreate
-{
-    private ArchiveCreateEntry[] entries;
-
-    auto byChunk(size_t chunkSz = 4096)
-    in (chunkSz % 512 == 0, "chunk size must be a multiple of 512")
-    {
-        return ArchiveTarCreateByChunk(chunkSz, entries);
-    }
-
-    void writeToFile(string archiveFilePath)
-    {
-        import std.stdio : File;
-
-        auto f = File(archiveFilePath, "wb");
-        foreach (chunk; byChunk())
-        {
-            f.rawWrite(chunk);
-        }
-        f.close();
-    }
-}
-
-private struct ArchiveTarCreateByChunk
+private struct TarArchiveCreate(I)
 {
     // init data
+    I entriesInput;
     ubyte[] buffer;
-    ArchiveCreateEntry[] remainingEntries;
 
     // current chunk (front data)
     ubyte[] chunk; // data ready
@@ -75,17 +31,17 @@ private struct ArchiveTarCreateByChunk
 
     // current entry being processed
     ArchiveCreateEntry entry;
-    ByteRange entryChunk;
+    ByteRange entryChunks;
 
     // footer is two empty blocks
     size_t footer;
     enum footerLen = 1024;
 
-    this(size_t bufSize, ArchiveCreateEntry[] entries)
+    this(I entries, size_t chunkSize)
     {
-        enforce(bufSize % 512 == 0, "buffer size must be a multiple of 512");
-        buffer = new ubyte[bufSize];
-        remainingEntries = entries;
+        enforce(chunkSize % 512 == 0, "chunk size must be a multiple of 512");
+        entriesInput = entries;
+        buffer = new ubyte[chunkSize];
         avail = buffer;
         popFront();
     }
@@ -97,11 +53,11 @@ private struct ArchiveTarCreateByChunk
             return true;
 
         // more files to be processed
-        if (remainingEntries.length)
+        if (!entriesInput.empty)
             return false;
 
-        // current file not exhausted
-        if (hasEntryChunk())
+        // current entry not exhausted
+        if (hasEntryChunks())
             return false;
 
         // some unconsumed flying data
@@ -144,40 +100,48 @@ private struct ArchiveTarCreateByChunk
         avail = buffer;
     }
 
-    private bool hasEntryChunk()
+    private bool hasEntryChunks()
     {
-        return entryChunk && !entryChunk.empty;
+        return entryChunks && !entryChunks.empty;
     }
 
     private bool moreToRead()
     {
-        return remainingEntries.length || hasEntryChunk();
+        return !entriesInput.empty || hasEntryChunks();
     }
 
     private void nextBlock()
     in (avail.length >= 512)
     {
-        if (!entry || !hasEntryChunk())
+        if (!entry || !hasEntryChunks())
         {
-            enforce(remainingEntries.length);
-            entry = remainingEntries[0];
-            remainingEntries = remainingEntries[1 .. $];
+            enforce(!entriesInput.empty);
+            entry = entriesInput.front;
+            entriesInput.popFront();
             avail = TarHeader.fillWith(entry, avail);
-            entryChunk = entry.byChunk(512);
+            entryChunks = entry.byChunk(512);
         }
         else
         {
-            auto filled = entryChunk.front;
+            auto filled = entryChunks.front;
             avail[0 .. filled.length] = filled;
             avail = avail[filled.length .. $];
-            entryChunk.popFront();
-            if (entryChunk.empty)
+            entryChunks.popFront();
+            if (entryChunks.empty)
             {
                 const pad = avail.length % 512;
                 avail[0 .. pad] = 0;
                 avail = avail[pad .. $];
             }
         }
+    }
+}
+
+struct ArchiveTar
+{
+    static ArchiveTarRead readFromPath(string archivePath)
+    {
+        return ArchiveTarRead(archivePath);
     }
 }
 

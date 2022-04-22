@@ -1,8 +1,9 @@
 module test.archive;
 
+import squiz_box.core;
 import squiz_box.tar;
 
-import test.util : binDiff, DeleteMe, testPath;
+import test.util;
 
 string[] filesForArchive()
 {
@@ -13,10 +14,14 @@ string[] filesForArchive()
     ];
 }
 
-shared static this()
+version (Posix)
 {
-    import std.process;
-    execute(["chmod", "666", testPath("data/folder/chmod 666.txt")]);
+    shared static this()
+    {
+        import std.process;
+
+        execute(["chmod", "666", testPath("data/folder/chmod 666.txt")]);
+    }
 }
 
 void testArchiveContent(string archivePath)
@@ -54,32 +59,26 @@ void testArchiveContent(string archivePath)
 
 }
 
-@("Write tar")
+@("Create tar")
 unittest
 {
-    import std.algorithm : sum;
-    import std.conv : to;
+    import std.algorithm : map, sum;
     import std.file : read;
-    import std.stdio : File;
 
-    auto archive = DeleteMe("archive", ".tar");
-    const files = filesForArchive();
-    auto tar = ArchiveTar.createWithFiles(files, testPath("data"));
+    auto archive = Path("archive", ".tar");
+    auto base = testPath("data");
 
-    auto f = File(archive.path, "wb");
-    foreach (chunk; tar.byChunk(4096))
-    {
-        f.rawWrite(chunk);
-    }
-    f.close();
+    filesForArchive()
+        .map!(p => fileEntryFromBase(p, base))
+        .createTarArchive()
+        .writeToFile(archive.path);
 
     testArchiveContent(archive.path);
 
-    enum expectedLen = 2*512 + 512 + 3584 + 2*512 + 2*512;
-    auto content = cast(const(ubyte)[])read(archive.path);
-    assert(content.length  == expectedLen);
-    assert(content[$-1024 .. $].sum() == 0);
-
+    enum expectedLen = 2 * 512 + 512 + 3584 + 2 * 512 + 2 * 512;
+    auto content = cast(const(ubyte)[]) read(archive.path);
+    assert(content.length == expectedLen);
+    assert(content[$ - 1024 .. $].sum() == 0);
 }
 
 @("Read tar")

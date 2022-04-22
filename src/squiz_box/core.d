@@ -22,24 +22,27 @@ template isByteRange(BR)
 static assert(isByteRange!ByteRange);
 
 /// Static check that a type is an InputRange of ArchiveCreateEntry
-template isArchiveCreateEntryRange(AER)
+template isArchiveCreateEntryRange(I)
 {
     import std.range : ElementType, isInputRange;
 
-    enum isArchiveCreateEntryRange = isInputRange!AER && is(ElementType!AER : ArchiveCreateEntry);
+    enum isArchiveCreateEntryRange = isInputRange!I && is(ElementType!I : ArchiveCreateEntry);
 }
 
 static assert(isArchiveCreateEntryRange!(ArchiveCreateEntry[]));
 
 /// Static check that a type is an InputRange of ArchiveExtractEntry
-template isArchiveExtractEntryRange(AER)
+template isArchiveExtractEntryRange(I)
 {
     import std.range : ElementType, isInputRange;
 
-    enum isArchiveExtractEntryRange = isInputRange!AER && is(ElementType!AER : ArchiveExtractEntry);
+    enum isArchiveExtractEntryRange = isInputRange!I && is(ElementType!I : ArchiveExtractEntry);
 }
 
 static assert(isArchiveExtractEntryRange!(ArchiveExtractEntry[]));
+
+/// default chunk size for data exchanges and I/O operations
+enum defaultChunkSize = 8192;
 
 version (Posix)
 {
