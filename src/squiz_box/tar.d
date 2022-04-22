@@ -12,7 +12,7 @@ import std.range.primitives;
 /// corresponding to the entries in input.
 /// chunkSize must be a multiple of 512.
 auto createTarArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
-if (isArchiveCreateEntryRange!I)
+        if (isArchiveCreateEntryRange!I)
 in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
     return TarArchiveCreate!I(entries, chunkSize);
@@ -139,13 +139,11 @@ private struct TarArchiveCreate(I)
 static assert(isByteRange!(TarArchiveCreate!(ArchiveCreateEntry[])));
 
 /// Return a range of entries from a Tar formatted byte range
-auto readTarArchive(I)(I tarInput)
-if (isByteRange!I)
+auto readTarArchive(I)(I tarInput) if (isByteRange!I)
 {
     auto dataInput = new ByteRangeDataInput!I(tarInput);
     return ArchiveTarRead(dataInput);
 }
-
 
 private struct ArchiveTarRead
 {
@@ -216,8 +214,8 @@ private struct ArchiveTarRead
         enforce(
             checksum == computed,
             "Invalid TAR checksum at 0x" ~ (
-                _input.pos - 512 + th.chksum.offsetof).to!string(
-                16) ~
+                _input.pos - 512 + th.chksum.offsetof)
+                .to!string(16) ~
                 "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
         );
 
@@ -235,14 +233,12 @@ private struct ArchiveTarRead
         }
 
         _entry = new ArchiveTarExtractEntry(_input, data);
-        import std.stdio;
-        writeln("read entry: ", _entry);
 
         _next = next512(_input.pos + data.size);
     }
 }
 
-static assert (isArchiveExtractEntryRange!ArchiveTarRead);
+static assert(isArchiveExtractEntryRange!ArchiveTarRead);
 
 private struct EntryData
 {
@@ -335,7 +331,7 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
     {
         import std.range.interfaces : inputRangeObject;
 
-        enforce (
+        enforce(
             _input.pos == _start,
             "Data cursor has moved, this entry is not valid anymore"
         );
