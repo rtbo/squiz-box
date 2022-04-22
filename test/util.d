@@ -34,14 +34,28 @@ struct DeleteMe
                 remove(path);
         }
     }
+
+    string buildPath(Args...)(Args args) const
+    {
+        import std.path : buildPath;
+
+        return buildPath(path, args);
+    }
 }
 
-// used in place of DeleteMe if needed to inspect the file after
+// used in place of DeleteMe if needed to inspect the file after the test
 struct Path
 {
     this(string basename, string ext)
     {
         path = basename ~ ext;
+    }
+
+    string buildPath(Args...)(Args args) const
+    {
+        import std.path : buildPath;
+
+        return buildPath(path, args);
     }
 
     string path;
