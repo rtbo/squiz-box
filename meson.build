@@ -5,9 +5,11 @@ project('squiz-box', ['c', 'd'],
 subdir('3rdparty')
 
 squiz_src = files([
+    'src/squiz_box/c/bzip2.d',
     'src/squiz_box/c/lzma.d',
     'src/squiz_box/c/zlib.d',
 
+    'src/squiz_box/bz2.d',
     'src/squiz_box/core.d',
     'src/squiz_box/gz.d',
     'src/squiz_box/tar.d',
@@ -21,7 +23,7 @@ squiz_lib = library('squiz-box', squiz_src,
     include_directories: squiz_inc,
 )
 
-squiz_deps = [xz_dep, zlib_dep]
+squiz_deps = [zlib_dep, bz2_dep, xz_dep]
 
 squiz_dep = declare_dependency(
     link_with: squiz_lib,
