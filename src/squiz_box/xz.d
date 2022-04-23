@@ -11,33 +11,26 @@ import std.typecons;
 auto compressXz(I)(I input, uint level = 6, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
-    CompressXzPolicy params;
-    params.level = level;
+    auto alloc = new lzma_allocator;
+    alloc.alloc = &(gcAlloc!size_t);
+    alloc.free = &gcFree;
 
-    return CompressDecompressAlgo!(I, CompressXzPolicy)(input, chunkSize, params);
+    auto stream = new lzma_stream;
+    stream.allocator = alloc;
+
+    const check = lzma_check.CRC64;
+
+    const ret = lzma_easy_encoder(stream, level, check);
+    enforce(ret == lzma_ret.OK, "Could not initialize LZMA encoder: " ~ ret.to!string);
+
+    auto buffer = new ubyte[chunkSize];
+
+    return CompressDecompressAlgo!(I, LzmaCode)(input, stream, buffer);
 }
 
-private struct CompressXzPolicy
+private struct LzmaCode
 {
     alias Stream = lzma_stream;
-
-    uint level = 6;
-    lzma_check check = lzma_check.CRC64;
-
-    static Stream* initialize(CompressXzPolicy params)
-    {
-        auto alloc = new lzma_allocator;
-        alloc.alloc = &(gcAlloc!size_t);
-        alloc.free = &gcFree;
-
-        auto stream = new lzma_stream;
-        stream.allocator = alloc;
-
-        const ret = lzma_easy_encoder(stream, params.level, params.check);
-        enforce(ret == lzma_ret.OK, "Could not initialize LZMA encoder: " ~ ret.to!string);
-
-        return stream;
-    }
 
     static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
     {
@@ -56,43 +49,20 @@ private struct CompressXzPolicy
 auto decompressXz(I)(I input, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
-    DecompressXzPolicy params;
+    auto alloc = new lzma_allocator;
+    alloc.alloc = &(gcAlloc!size_t);
+    alloc.free = &gcFree;
 
-    return CompressDecompressAlgo!(I, DecompressXzPolicy)(input, chunkSize, params);
-}
+    auto stream = new lzma_stream;
+    stream.allocator = alloc;
 
-private struct DecompressXzPolicy
-{
-    alias Stream = lzma_stream;
+    const memLimit = size_t.max;
+    const flags = 0;
 
-    size_t memLimit = size_t.max;
-    uint flags = 0;
+    const ret = lzma_stream_decoder(stream, memLimit, flags);
+    enforce(ret == lzma_ret.OK, "Could not initialize LZMA decoder: " ~ ret.to!string);
 
-    static Stream* initialize(DecompressXzPolicy params)
-    {
-        auto alloc = new lzma_allocator;
-        alloc.alloc = &(gcAlloc!size_t);
-        alloc.free = &gcFree;
+    auto buffer = new ubyte[chunkSize];
 
-        auto stream = new lzma_stream;
-        stream.allocator = alloc;
-
-        const ret = lzma_stream_decoder(stream, params.memLimit, params.flags);
-        enforce(ret == lzma_ret.OK, "Could not initialize LZMA decoder: " ~ ret.to!string);
-
-        return stream;
-    }
-
-    static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
-    {
-        const action = lzma_action.RUN;
-        const res = lzma_code(stream, action);
-
-        if (res == lzma_ret.STREAM_END)
-            return Yes.streamEnded;
-
-        enforce(res == lzma_ret.OK, "LZMA decoding failed with code: " ~ res.to!string);
-
-        return No.streamEnded;
-    }
+    return CompressDecompressAlgo!(I, LzmaCode)(input, stream, buffer);
 }

@@ -10,40 +10,34 @@ import std.typecons;
 auto compressGz(I)(I input, uint level = 6, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
-    CompressGzPolicy params;
-    params.level = level;
-    return CompressDecompressAlgo!(I, CompressGzPolicy)(input, chunkSize, params);
+    const windowBits = 15;
+    const memLevel = 8;
+    const strategy = Z_DEFAULT_STRATEGY;
+
+    auto stream = new z_stream;
+    stream.zalloc = &(gcAlloc!uint);
+    stream.zfree = &gcFree;
+
+    const ret = deflateInit2(
+        stream, level, Z_DEFLATED,
+        16 + windowBits /* +16 for gzip instead of zlib wrapper */ ,
+        memLevel,
+        strategy
+    );
+
+    enforce(
+        ret == Z_OK,
+        "Could not initialize Zlib encoder: " ~ zResultToString(ret)
+    );
+
+    auto buffer = new ubyte[chunkSize];
+
+    return CompressDecompressAlgo!(I, ZlibDeflate)(input, stream, buffer);
 }
 
-private struct CompressGzPolicy
+private struct ZlibDeflate
 {
     alias Stream = z_stream;
-
-    int level = 6;
-    int windowBits = 15;
-    int memLevel = 8;
-    int strategy = Z_DEFAULT_STRATEGY;
-
-    static Stream* initialize(CompressGzPolicy params)
-    {
-        auto stream = new z_stream;
-        stream.zalloc = &(gcAlloc!uint);
-        stream.zfree = &gcFree;
-
-        const ret = deflateInit2(
-            stream, params.level, Z_DEFLATED,
-            16 + params.windowBits /* +16 for gzip instead of zlib wrapper */ ,
-            params.memLevel,
-            params.strategy);
-
-        enforce(
-            ret == Z_OK,
-            "Could not initialize Zlib encoder: " ~ zResultToString(ret)
-        );
-
-
-        return stream;
-    }
 
     static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
     {
@@ -60,37 +54,33 @@ private struct CompressGzPolicy
 }
 
 auto decompressGz(I)(I input, size_t chunkSize = defaultChunkSize)
-if (isByteRange!I)
+        if (isByteRange!I)
 {
-    DecompressGzPolicy params;
-    return CompressDecompressAlgo!(I, DecompressGzPolicy)(input, chunkSize, params);
+    const windowBits = 15;
+
+    auto stream = new z_stream;
+    stream.zalloc = &(gcAlloc!uint);
+    stream.zfree = &gcFree;
+
+    const ret = inflateInit2(
+        stream, 16 + windowBits /* +16 for gzip instead of zlib wrapper */ ,
+    );
+
+    enforce(
+        ret == Z_OK,
+        "Could not initialize Zlib inflate stream: " ~ zResultToString(ret)
+    );
+
+    auto buffer = new ubyte[chunkSize];
+
+    return CompressDecompressAlgo!(I, ZlibInflate)(input, stream, buffer);
 }
 
-private struct DecompressGzPolicy
+private struct ZlibInflate
 {
     alias Stream = z_stream;
 
-    int windowBits = 15;
-
-    static Stream* initialize(DecompressGzPolicy params)
-    {
-        auto stream = new z_stream;
-        stream.zalloc = &(gcAlloc!uint);
-        stream.zfree = &gcFree;
-
-        const ret = inflateInit2(
-            stream, 16 + params.windowBits /* +16 for gzip instead of zlib wrapper */ ,
-        );
-
-        enforce(
-            ret == Z_OK,
-            "Could not initialize Zlib inflate stream: " ~ zResultToString(ret)
-        );
-
-        return stream;
-    }
-
-    static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
+    static Flag!"streamEnded" process(Stream* stream, bool /+inputEmpty+/)
     {
         const flush = Z_NO_FLUSH;
         const res = inflate(stream, flush);

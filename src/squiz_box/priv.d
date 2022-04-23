@@ -201,18 +201,16 @@ struct DataInputByteRange
     }
 }
 
-
 // Common algorithm for all compression/decompression functions.
 // I is a byte input range
-// P is at the same time Policy (static functions to initialize, and process stream)
-// and intial parameters (instance fields).
+// P is a stream processor
 // This common struct is made possible thanks to the great job of the zlib, bzip2 and lzma authors.
 // Zlib authors have defined an extremly versatile stream interface that bzip2 and lzma authors have reused.
 struct CompressDecompressAlgo(I, P)
 {
     /// Byte input range (by chunks)
     I input;
-    /// Processor stream (with common interface by zlib, bzip2 and lzma)
+    /// Processed stream (with common interface by zlib, bzip2 and lzma)
     P.Stream* stream;
 
     /// Byte chunk from the input, provided to the stream
@@ -226,11 +224,11 @@ struct CompressDecompressAlgo(I, P)
     /// Whether the end of stream was reported by the Policy
     bool ended;
 
-    this(I input, size_t chunkSize, P params)
+    this(I input, P.Stream* stream, ubyte[] outBuffer)
     {
         this.input = input;
-        outBuffer = new ubyte[chunkSize];
-        stream = P.initialize(params);
+        this.stream = stream;
+        this.outBuffer = outBuffer;
         prime();
     }
 

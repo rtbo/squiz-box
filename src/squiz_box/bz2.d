@@ -65,33 +65,30 @@ private string bzResultToString(int res)
 
 auto compressBz2(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
-    CompressBz2Policy params;
-    return CompressDecompressAlgo!(I, CompressBz2Policy)(input, chunkSize, params);
+    auto stream = new bz_stream;
+    stream.bzalloc = &(gcAlloc!int);
+    stream.bzfree = &gcFree;
+
+    const blockSize100k = 9;
+    const verbosity = 0;
+    const workFactor = 0;
+
+    const ret = BZ2_bzCompressInit(
+        stream, blockSize100k, verbosity, workFactor);
+
+    enforce(
+        ret == BZ_OK,
+        "Could not initialize Bzip2 compressor: " ~ bzResultToString(ret)
+    );
+
+    auto buffer = new ubyte[chunkSize];
+
+    return CompressDecompressAlgo!(I, Bz2Compress)(input, stream, buffer);
 }
 
-private struct CompressBz2Policy
+private struct Bz2Compress
 {
     alias Stream = bz_stream;
-
-    int blockSize100k = 9;
-    int verbosity = 0;
-    int workFactor = 0;
-
-    static bz_stream* initialize(CompressBz2Policy params)
-    {
-        auto stream = new bz_stream;
-        stream.bzalloc = &(gcAlloc!int);
-        stream.bzfree = &gcFree;
-
-        const ret = BZ2_bzCompressInit(
-            stream, params.blockSize100k, params.verbosity, params.workFactor);
-
-        enforce(
-            ret == BZ_OK,
-            "Could not initialize Bzip2 compressor: " ~ bzResultToString(ret)
-        );
-        return stream;
-    }
 
     static Flag!"streamEnded" process(bz_stream* stream, bool inputEmpty)
     {
@@ -112,35 +109,31 @@ private struct CompressBz2Policy
 }
 
 auto decompressBz2(I)(I input, size_t chunkSize = defaultChunkSize)
-if (isByteRange!I)
+        if (isByteRange!I)
 {
-    DecompressBz2Policy params;
+    auto stream = new bz_stream;
+    stream.bzalloc = &(gcAlloc!int);
+    stream.bzfree = &gcFree;
 
-    return CompressDecompressAlgo!(I, DecompressBz2Policy)(input, chunkSize, params);
+    const verbosity = 0;
+    const small = 0;
+
+    const ret = BZ2_bzDecompressInit(
+        stream, verbosity, small);
+
+    enforce(
+        ret == BZ_OK,
+        "Could not initialize Bzip2 decompressor: " ~ bzResultToString(ret)
+    );
+
+    auto buffer = new ubyte[chunkSize];
+
+    return CompressDecompressAlgo!(I, Bz2Decompress)(input, stream, buffer);
 }
 
-private struct DecompressBz2Policy
+private struct Bz2Decompress
 {
     alias Stream = bz_stream;
-
-    int verbosity = 0;
-    int small = 0;
-
-    static bz_stream* initialize(DecompressBz2Policy params)
-    {
-        auto stream = new bz_stream;
-        stream.bzalloc = &(gcAlloc!int);
-        stream.bzfree = &gcFree;
-
-        const ret = BZ2_bzDecompressInit(
-            stream, params.verbosity, params.small);
-
-        enforce(
-            ret == BZ_OK,
-            "Could not initialize Bzip2 decompressor: " ~ bzResultToString(ret)
-        );
-        return stream;
-    }
 
     static Flag!"streamEnded" process(bz_stream* stream, bool inputEmpty)
     {
