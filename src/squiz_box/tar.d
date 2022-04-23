@@ -12,7 +12,7 @@ import std.range.primitives;
 /// corresponding to the entries in input.
 /// chunkSize must be a multiple of 512.
 auto createTarArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
-        if (isArchiveCreateEntryRange!I)
+        if (isCreateEntryRange!I)
 in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
     return TarArchiveCreate!I(entries, chunkSize);
@@ -238,7 +238,7 @@ private struct ArchiveTarRead
     }
 }
 
-static assert(isArchiveExtractEntryRange!ArchiveTarRead);
+static assert(isExtractEntryRange!ArchiveTarRead);
 
 private struct EntryData
 {
