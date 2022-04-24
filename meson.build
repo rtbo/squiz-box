@@ -15,6 +15,7 @@ squiz_src = files([
     'src/squiz_box/priv.d',
     'src/squiz_box/tar.d',
     'src/squiz_box/xz.d',
+    'src/squiz_box/zip.d',
 ])
 
 squiz_inc = include_directories('src')
