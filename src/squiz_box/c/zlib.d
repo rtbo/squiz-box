@@ -1036,10 +1036,9 @@ extern (C) int inflateGetHeader (z_streamp strm,
    stream state was inconsistent.
 */
 
-/*
 extern (C) int inflateBackInit (z_streamp strm, int windowBits,
-                                        unsigned char FAR *window);
-
+                                        ubyte *window);
+/*
      Initialize the internal stream state for decompression using inflateBack()
    calls.  The fields zalloc, zfree and opaque in strm must be initialized
    before the call.  If zalloc and zfree are Z_NULL, then the default library-
@@ -1058,8 +1057,8 @@ extern (C) int inflateBackInit (z_streamp strm, int windowBits,
    the version of the header file.
 */
 
-alias in_func = uint function (void*, const(ubyte)**);
-alias out_func = int function (void*, const(ubyte)*, uint);
+alias in_func = extern(C) uint function (void*, const(ubyte)**) nothrow;
+alias out_func = extern(C) int function (void*, const(ubyte)*, uint) nothrow;
 
 extern (C) int inflateBack (z_streamp strm,
         in_func in_, void *in_desc,
