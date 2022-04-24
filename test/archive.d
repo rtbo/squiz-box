@@ -5,6 +5,7 @@ import squiz_box.core;
 import squiz_box.gz;
 import squiz_box.tar;
 import squiz_box.xz;
+import squiz_box.zip;
 
 import test.util;
 
@@ -48,15 +49,61 @@ void testTarArchiveContent(string archivePath)
 
     const archiveShell = escapeShellFileName(archivePath);
 
-    res = executeShell("tar -xOf " ~ archiveShell ~ " file1.txt | sha1sum");
+    auto sha1sumFile(string filename)
+    {
+        const fileShell = escapeShellFileName(filename);
+        return executeShell("tar -xOf " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+    }
+
+    res = sha1sumFile("file1.txt");
     assert(res.status == 0);
     assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
 
-    res = executeShell("tar -xOf " ~ archiveShell ~ " 'file 2.txt' | sha1sum");
+    res = sha1sumFile("file 2.txt");
     assert(res.status == 0);
     assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
 
-    res = executeShell("tar -xOf " ~ archiveShell ~ " 'folder/chmod 666.txt' | sha1sum");
+    res = sha1sumFile("folder/chmod 666.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+}
+
+void testZipArchiveContent(string archivePath)
+{
+    import std.algorithm : canFind;
+    import std.process : execute, executeShell, escapeShellFileName;
+    import std.regex : matchFirst;
+    import std.string : splitLines;
+
+    const line1 = `^\s*7\s.+file1.txt$`;
+    const line2 = `^\s*3521\s.+file 2.txt$`;
+    const line3 = `^\s*26\s.+folder/chmod 666.txt$`;
+
+    auto res = execute(["unzip", "-l", archivePath]);
+    assert(res.status == 0);
+    const lines = res.output.splitLines();
+    assert(lines.length == 8);
+    assert(matchFirst(lines[3], line1));
+    assert(matchFirst(lines[4], line2));
+    assert(matchFirst(lines[5], line3));
+
+    const archiveShell = escapeShellFileName(archivePath);
+
+    auto sha1sumFile(string filename)
+    {
+        const fileShell = escapeShellFileName(filename);
+        return executeShell("unzip -p " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+    }
+
+    res = sha1sumFile("file1.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
+
+    res = sha1sumFile("file 2.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
+
+    res = sha1sumFile("folder/chmod 666.txt");
     assert(res.status == 0);
     assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
 }
@@ -88,7 +135,7 @@ unittest
     import std.algorithm : map, sum;
     import std.file : read;
 
-    auto archive = DeleteMe("archive", ".tar");
+    auto archive = Path("archive", ".tar");
     auto base = testPath("data");
 
     filesForArchive()
@@ -231,4 +278,21 @@ unittest
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm);
+}
+
+@("Create Zip")
+unittest
+{
+    import std.algorithm : map, sum;
+    import std.file : read;
+
+    auto archive = Path("archive", ".zip");
+    auto base = testPath("data");
+
+    filesForArchive()
+        .map!(p => fileEntryFromBase(p, base))
+        .createZipArchive()
+        .writeBinaryFile(archive.path);
+
+    testZipArchiveContent(archive.path);
 }
