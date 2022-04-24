@@ -77,8 +77,15 @@ private struct ZipArchiveCreate(I)
         foreach (entry; entries)
         {
             const path = entry.path;
-            maxHeaderSize = max(maxHeaderSize, LocalFileHeader.headerLength(path, null));
-            centralDirectorySize += CentralFileHeader.headerLength(path, null, null);
+            size_t extraFieldLength;
+            version(Posix)
+            {
+                extraFieldLength = UnixExtraField.totalLength(entry.linkname);
+            }
+            // Note: if the archive happens to need Zip64 extensions, more header allocations will be needed.
+
+            maxHeaderSize = max(maxHeaderSize, LocalFileHeader.totalLength(path, null) + extraFieldLength);
+            centralDirectorySize += CentralFileHeader.totalLength(path, null, null) + extraFieldLength;
         }
 
         auto buf = new ubyte[maxHeaderSize + centralDirectorySize];
@@ -98,14 +105,42 @@ private struct ZipArchiveCreate(I)
 
         string path = entry.path;
 
-        version(Windows)
+        version (Windows)
         {
             import std.string : replace;
+
             path = replace(path, '\\', '/');
         }
 
-        const localHeaderLength = LocalFileHeader.headerLength(path, null);
-        const centralHeaderLength = CentralFileHeader.headerLength(path, null, null);
+
+        ubyte[] extraField;
+
+        version (Posix)
+        {
+            import std.datetime.systime : Clock, stdTimeToUnixTime;
+
+            const linkname = entry.linkname;
+            const atime = stdTimeToUnixTime!int(Clock.currStdTime);
+            const mtime = stdTimeToUnixTime!int(entry.timeLastModified.stdTime);
+            const uid = entry.ownerId;
+            const gid = entry.groupId;
+
+            UnixExtraField unix = void;
+            unix.signature = UnixExtraField.expectedSignature;
+            unix.size = cast(ushort)(linkname.length + 12);
+            unix.atime = atime;
+            unix.mtime = mtime;
+            unix.uid = cast(ushort)uid;
+            unix.gid = cast(ushort)gid;
+
+            extraField = new ubyte[unix.totalLength(linkname)];
+            unix.writeTo(extraField, linkname);
+        }
+
+        // TODO Zip64
+
+        const localHeaderLength = LocalFileHeader.totalLength(path, extraField);
+        const centralHeaderLength = CentralFileHeader.totalLength(path, extraField, null);
 
         static if (!isForwardRange!I)
         {
@@ -113,8 +148,6 @@ private struct ZipArchiveCreate(I)
                 localHeaderBuffer.length = localHeaderLength;
             centralHeaderBuffer.length += centralHeaderLength;
         }
-
-        // FIXME Zip64
 
         LocalFileHeader local = void;
         local.signature = LocalFileHeader.expectedSignature;
@@ -127,8 +160,8 @@ private struct ZipArchiveCreate(I)
         local.uncompressedSize = cast(uint) deflater.inflatedSize;
         // TODO: use store instead of deflate if smaller
         local.fileNameLength = cast(ushort) path.length;
-        local.extraFieldLength = 0;
-        currentLocalHeader = local.writeTo(localHeaderBuffer, path, null);
+        local.extraFieldLength = cast(ushort) extraField.length;
+        currentLocalHeader = local.writeTo(localHeaderBuffer, path, extraField);
 
         ushort versionMadeBy = 20;
         uint externalAttributes = entry.attributes;
@@ -150,7 +183,7 @@ private struct ZipArchiveCreate(I)
         central.compressedSize = cast(uint) currentDeflated.length;
         central.uncompressedSize = cast(uint) deflater.inflatedSize;
         central.fileNameLength = cast(ushort) path.length;
-        central.extraFieldLength = 0;
+        central.extraFieldLength = cast(ushort)extraField.length;
         central.fileCommentLength = 0;
         central.diskNumberStart = 0;
         central.internalFileAttributes = 0;
@@ -158,7 +191,7 @@ private struct ZipArchiveCreate(I)
         central.relativeLocalHeaderOffset = cast(uint) localHeaderOffset;
         central.writeTo(
             centralHeaderBuffer[centralDirectory.length .. centralDirectory.length + centralHeaderLength],
-            path, null, null
+            path, extraField, null
         );
 
         const entryLen = localHeaderLength + currentDeflated.length;
@@ -184,7 +217,7 @@ private struct ZipArchiveCreate(I)
         footer.centralDirOffset = cast(uint) centralDirOffset;
         footer.fileCommentLength = 0;
 
-        endOfCentralDirectory = new ubyte[EndOfCentralDirectory.length(null)];
+        endOfCentralDirectory = new ubyte[EndOfCentralDirectory.totalLength(null)];
         endOfCentralDirectory = footer.writeTo(endOfCentralDirectory, null);
 
         endOfCentralDirReady = true;
@@ -379,7 +412,7 @@ private struct LocalFileHeader
     LittleEndian!2 fileNameLength;
     LittleEndian!2 extraFieldLength;
 
-    static size_t headerLength(string fileName, const(ubyte)[] extraField)
+    static size_t totalLength(string fileName, const(ubyte)[] extraField)
     {
         return LocalFileHeader.sizeof + fileName.length + extraField.length;
     }
@@ -389,7 +422,7 @@ private struct LocalFileHeader
         assert(fileName.length == fileNameLength.val);
         assert(extraField.length == extraFieldLength.val);
 
-        assert(buffer.length >= headerLength(fileName, extraField));
+        assert(buffer.length >= totalLength(fileName, extraField));
 
         auto ptr = signature.data.ptr;
         buffer[0 .. LocalFileHeader.sizeof] = ptr[0 .. LocalFileHeader.sizeof];
@@ -423,7 +456,7 @@ private struct CentralFileHeader
     LittleEndian!4 externalFileAttributes;
     LittleEndian!4 relativeLocalHeaderOffset;
 
-    static size_t headerLength(string fileName, const(ubyte)[] extraField, string fileComment)
+    static size_t totalLength(string fileName, const(ubyte)[] extraField, string fileComment)
     {
         return CentralFileHeader.sizeof + fileName.length + extraField.length + fileComment.length;
     }
@@ -434,7 +467,7 @@ private struct CentralFileHeader
         assert(extraField.length == extraFieldLength.val);
         assert(fileComment.length == fileCommentLength.val);
 
-        assert(buffer.length >= headerLength(fileName, extraField, fileComment));
+        assert(buffer.length >= totalLength(fileName, extraField, fileComment));
 
         auto ptr = signature.data.ptr;
         buffer[0 .. CentralFileHeader.sizeof] = ptr[0 .. CentralFileHeader.sizeof];
@@ -461,7 +494,7 @@ private struct EndOfCentralDirectory
     LittleEndian!4 centralDirOffset;
     LittleEndian!2 fileCommentLength;
 
-    static size_t length(string comment)
+    static size_t totalLength(string comment)
     {
         return EndOfCentralDirectory.sizeof + comment.length;
     }
@@ -470,7 +503,7 @@ private struct EndOfCentralDirectory
     {
         assert(comment.length == fileCommentLength.val);
 
-        assert(buffer.length >= length(comment));
+        assert(buffer.length >= totalLength(comment));
 
         auto ptr = signature.data.ptr;
         buffer[0 .. EndOfCentralDirectory.sizeof] = ptr[0 .. EndOfCentralDirectory.sizeof];
@@ -485,6 +518,43 @@ private struct EndOfCentralDirectory
 static assert(LocalFileHeader.sizeof == 30);
 static assert(CentralFileHeader.sizeof == 46);
 static assert(EndOfCentralDirectory.sizeof == 22);
+
+version (Posix)
+{
+    private struct UnixExtraField
+    {
+        enum expectedSignature = 0x000d;
+
+        LittleEndian!2 signature;
+        LittleEndian!2 size;
+        LittleEndian!4 atime;
+        LittleEndian!4 mtime;
+        LittleEndian!2 uid;
+        LittleEndian!2 gid;
+
+        static size_t totalLength(string linkname)
+        {
+            return UnixExtraField.sizeof + linkname.length;
+        }
+
+        ubyte[] writeTo(ubyte[] buffer, string linkname)
+        {
+            assert(linkname.length == size.val - 12);
+
+            assert(buffer.length >= totalLength(linkname));
+
+            auto ptr = signature.data.ptr;
+            buffer[0 .. UnixExtraField.sizeof] = ptr[0 .. UnixExtraField.sizeof];
+
+            size_t offset = UnixExtraField.sizeof;
+            writeField(buffer, linkname, offset);
+
+            return buffer[0 .. offset];
+        }
+    }
+
+    static assert(UnixExtraField.sizeof == 16);
+}
 
 private struct LittleEndian(size_t sz) if (sz == 2 || sz == 4 || sz == 8)
 {

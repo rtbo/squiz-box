@@ -345,10 +345,11 @@ class FileArchiveEntry : ArchiveCreateEntry
     {
         version (Posix)
         {
-            import std.file : readLink;
-
-            return readLink(filePath);
+            import std.file : isSymlink, readLink;
+            if (isSymlink(filePath))
+                return readLink(filePath);
         }
+        return null;
     }
 
     @property size_t size()
