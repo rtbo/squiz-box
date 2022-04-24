@@ -77,10 +77,10 @@ private struct ZipArchiveCreate(I)
         foreach (entry; entries)
         {
             const path = entry.path;
-            size_t extraFieldLength;
-            version(Posix)
+            size_t extraFieldLength = SquizBoxExtraField.sizeof;
+            version (Posix)
             {
-                extraFieldLength = UnixExtraField.totalLength(entry.linkname);
+                extraFieldLength += UnixExtraField.totalLength(entry.linkname);
             }
             // Note: if the archive happens to need Zip64 extensions, more header allocations will be needed.
 
@@ -112,7 +112,6 @@ private struct ZipArchiveCreate(I)
             path = replace(path, '\\', '/');
         }
 
-
         ubyte[] extraField;
 
         version (Posix)
@@ -130,12 +129,19 @@ private struct ZipArchiveCreate(I)
             unix.size = cast(ushort)(linkname.length + 12);
             unix.atime = atime;
             unix.mtime = mtime;
-            unix.uid = cast(ushort)uid;
-            unix.gid = cast(ushort)gid;
+            unix.uid = cast(ushort) uid;
+            unix.gid = cast(ushort) gid;
 
-            extraField = new ubyte[unix.totalLength(linkname)];
-            unix.writeTo(extraField, linkname);
+            extraField = new ubyte[unix.totalLength(linkname) + SquizBoxExtraField.sizeof];
+            unix.writeTo(extraField[0 .. $ - SquizBoxExtraField.sizeof], linkname);
         }
+        else
+        {
+            extraField = new ubyte[SquizBoxExtraField.sizeof];
+        }
+        SquizBoxExtraField sb;
+        sb.attributes = entry.attributes;
+        sb.writeTo(extraField[$ - SquizBoxExtraField.sizeof .. $]);
 
         // TODO Zip64
 
@@ -183,7 +189,7 @@ private struct ZipArchiveCreate(I)
         central.compressedSize = cast(uint) currentDeflated.length;
         central.uncompressedSize = cast(uint) deflater.inflatedSize;
         central.fileNameLength = cast(ushort) path.length;
-        central.extraFieldLength = cast(ushort)extraField.length;
+        central.extraFieldLength = cast(ushort) extraField.length;
         central.fileCommentLength = 0;
         central.diskNumberStart = 0;
         central.internalFileAttributes = 0;
@@ -555,6 +561,25 @@ version (Posix)
 
     static assert(UnixExtraField.sizeof == 16);
 }
+
+// Extra field that places the file attributes in the local header
+private struct SquizBoxExtraField
+{
+    enum expectedSignature = 0x4273; // SB
+
+    LittleEndian!2 signature = expectedSignature;
+    LittleEndian!2 size = 4;
+    LittleEndian!4 attributes;
+
+    void writeTo(ubyte[] buffer)
+    {
+        assert(buffer.length == 8);
+        auto ptr = signature.data.ptr;
+        buffer[0 .. SquizBoxExtraField.sizeof] = ptr[0 .. SquizBoxExtraField.sizeof];
+    }
+}
+
+static assert(SquizBoxExtraField.sizeof == 8);
 
 private struct LittleEndian(size_t sz) if (sz == 2 || sz == 4 || sz == 8)
 {
