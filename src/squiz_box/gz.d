@@ -27,7 +27,7 @@ auto compressGz(I)(I input, uint level = 6, size_t chunkSize = defaultChunkSize)
 
     enforce(
         ret == Z_OK,
-        "Could not initialize Zlib encoder: " ~ zResultToString(ret)
+        "Could not initialize Zlib deflate stream: " ~ zResultToString(ret)
     );
 
     auto buffer = new ubyte[chunkSize];
@@ -94,7 +94,7 @@ private struct ZlibInflate
     }
 }
 
-private string zResultToString(int res)
+package string zResultToString(int res)
 {
     switch (res)
     {
@@ -121,7 +121,7 @@ private string zResultToString(int res)
     }
 }
 
-private string zFlushToString(int flush)
+package string zFlushToString(int flush)
 {
     switch (flush)
     {
@@ -144,7 +144,7 @@ private string zFlushToString(int flush)
     }
 }
 
-private void zPrintStream(z_stream* strm, string label)
+package void zPrintStream(z_stream* strm, string label)
 {
     import std.stdio;
     import std.string : fromStringz;

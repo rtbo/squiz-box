@@ -61,20 +61,6 @@ struct Path
     string path;
 }
 
-version (Posix)
-{
-    Permissions getPermissions(string filePath)
-    {
-        import core.sys.posix.sys.stat : stat, stat_t;
-        import std.exception : errnoEnforce;
-        import std.string : toStringz;
-
-        stat_t stat_s = void;
-        errnoEnforce(stat(filePath.toStringz(), &stat_s) == 0);
-        return posixModeToPerms(stat_s.st_mode);
-    }
-}
-
 /// Return a byte range that generates potentially very large amount of binary data.
 /// The data contains _num_ bytes in the form of 64 bits integers,
 /// starting at _start_ and stepping by _step_.

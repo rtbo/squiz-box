@@ -27,7 +27,7 @@ version (Posix)
     }
 }
 
-void testArchiveContent(string archivePath)
+void testTarArchiveContent(string archivePath)
 {
     import std.algorithm : canFind;
     import std.process : execute, executeShell, escapeShellFileName;
@@ -59,7 +59,27 @@ void testArchiveContent(string archivePath)
     res = executeShell("tar -xOf " ~ archiveShell ~ " 'folder/chmod 666.txt' | sha1sum");
     assert(res.status == 0);
     assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+}
 
+void testExtractedFiles(DM)(auto ref DM dm)
+{
+    import std.conv : octal;
+    import std.digest : hexDigest;
+    import std.digest.sha : SHA1;
+    import std.file : read, getLinkAttributes;
+
+    version (Posix)
+    {
+        assert(getLinkAttributes(dm.buildPath("file1.txt")) == octal!"100644");
+        assert(getLinkAttributes(dm.buildPath("file 2.txt")) == octal!"100644");
+        assert(getLinkAttributes(dm.buildPath("folder", "chmod 666.txt")) == octal!"100666");
+    }
+
+    assert(hexDigest!SHA1(read(
+            dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
+    assert(hexDigest!SHA1(read(
+            dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
+    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
 }
 
 @("Create Tar")
@@ -68,7 +88,7 @@ unittest
     import std.algorithm : map, sum;
     import std.file : read;
 
-    auto archive = Path("archive", ".tar");
+    auto archive = DeleteMe("archive", ".tar");
     auto base = testPath("data");
 
     filesForArchive()
@@ -76,7 +96,7 @@ unittest
         .createTarArchive()
         .writeBinaryFile(archive.path);
 
-    testArchiveContent(archive.path);
+    testTarArchiveContent(archive.path);
 
     enum expectedLen = 2 * 512 + 512 + 3584 + 2 * 512 + 2 * 512;
     auto content = cast(const(ubyte)[]) read(archive.path);
@@ -99,15 +119,26 @@ unittest
     struct Entry
     {
         string path;
-        uint permissions;
+        uint attributes;
         size_t size;
         char[40] sha1;
     }
 
+    version (Posix)
+    {
+        const attr644 = octal!"100644";
+        const attr666 = octal!"100666";
+    }
+    else
+    {
+        const attr644 = 0;
+        const attr666 = 0;
+    }
+
     const expectedEntries = [
-        Entry("file1.txt", octal!"644", 7, "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC"),
-        Entry("file 2.txt", octal!"644", 3521, "01FA4C5C29A58449EEF1665658C48C0D7829C45F"),
-        Entry("folder/chmod 666.txt", octal!"666", 26, "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3"),
+        Entry("file1.txt", attr644, 7, "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC"),
+        Entry("file 2.txt", attr644, 3521, "01FA4C5C29A58449EEF1665658C48C0D7829C45F"),
+        Entry("folder/chmod 666.txt", attr666, 26, "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3"),
     ];
 
     const readEntries = File(path, "rb")
@@ -115,9 +146,9 @@ unittest
         .readTarArchive()
         .map!((entry) {
             const content = entry.readContent();
-            return Entry (
+            return Entry(
                 entry.path,
-                entry.permissions,
+                entry.attributes,
                 entry.size,
                 hexDigest!SHA1(content)
             );
@@ -131,11 +162,7 @@ unittest
 unittest
 {
     import std.algorithm : each;
-    import std.conv : octal;
-    import std.digest : hexDigest;
-    import std.digest.sha : SHA1;
-    import std.file : mkdir, read;
-    import std.stdio : File;
+    import std.file : mkdir;
 
     const archive = testPath("data/archive.tar");
     const dm = DeleteMe("extraction_site", null);
@@ -146,24 +173,14 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
-
-    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
-    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
-    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+    testExtractedFiles(dm);
 }
 
 @("Decompress and extract tar.gz")
 unittest
 {
     import std.algorithm : each;
-    import std.conv : octal;
-    import std.digest : hexDigest;
-    import std.digest.sha : SHA1;
-    import std.file : mkdir, read;
-    import std.stdio : File;
+    import std.file : mkdir;
 
     const archive = testPath("data/archive.tar.gz");
     const dm = DeleteMe("extraction_site", null);
@@ -175,24 +192,14 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
-
-    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
-    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
-    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+    testExtractedFiles(dm);
 }
 
 @("Decompress and extract tar.bz2")
 unittest
 {
     import std.algorithm : each;
-    import std.conv : octal;
-    import std.digest : hexDigest;
-    import std.digest.sha : SHA1;
-    import std.file : mkdir, read;
-    import std.stdio : File;
+    import std.file : mkdir;
 
     const archive = testPath("data/archive.tar.bz2");
     const dm = DeleteMe("extraction_site", null);
@@ -204,24 +211,14 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
-
-    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
-    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
-    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+    testExtractedFiles(dm);
 }
 
 @("Decompress and extract tar.xz")
 unittest
 {
     import std.algorithm : each;
-    import std.conv : octal;
-    import std.digest : hexDigest;
-    import std.digest.sha : SHA1;
-    import std.file : mkdir, read;
-    import std.stdio : File;
+    import std.file : mkdir;
 
     const archive = testPath("data/archive.tar.xz");
     const dm = DeleteMe("extraction_site", null);
@@ -233,11 +230,5 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    assert(getPermissions(dm.buildPath("file1.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("file 2.txt")) == octal!"644");
-    assert(getPermissions(dm.buildPath("folder", "chmod 666.txt")) == octal!"666");
-
-    assert(hexDigest!SHA1(read(dm.buildPath("file1.txt"))) == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
-    assert(hexDigest!SHA1(read(dm.buildPath("file 2.txt"))) == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
-    assert(hexDigest!SHA1(read(dm.buildPath("folder", "chmod 666.txt"))) == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
+    testExtractedFiles(dm);
 }

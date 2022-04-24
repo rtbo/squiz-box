@@ -28,7 +28,7 @@ unittest
     tarF.close();
     tarXzF.close();
 
-    testArchiveContent(archive.path);
+    testTarArchiveContent(archive.path);
 }
 
 @("Compress GZ sequential")
@@ -102,7 +102,7 @@ unittest
 
     tarF.close();
 
-    testArchiveContent(archive.path);
+    testTarArchiveContent(archive.path);
 }
 
 @("Compress Bz2 sequential")
@@ -183,7 +183,7 @@ unittest
     tarF.close();
     tarXzF.close();
 
-    testArchiveContent(archive.path);
+    testTarArchiveContent(archive.path);
 }
 
 @("Compress XZ sequential")

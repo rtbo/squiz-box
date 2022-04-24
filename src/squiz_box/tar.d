@@ -227,9 +227,13 @@ private struct ArchiveTarRead
         data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
         version (Posix)
         {
+            // tar mode contains stat.st_mode & 07777.
+            // we have to add the missing flags corresponding to file type
+            // (and by no way tar mode is meaningful on Windows)
+            const filetype = posixModeFileType(th.typeflag);
+            data.attributes = parseOctalString(th.mode) | filetype;
             data.ownerId = parseOctalString(th.uid);
             data.groupId = parseOctalString(th.gid);
-            data.permissions = cast(Permissions) parseOctalString(th.mode);
         }
 
         _entry = new ArchiveTarExtractEntry(_input, data);
@@ -247,12 +251,12 @@ private struct EntryData
     EntryType type;
     size_t size;
     SysTime timeLastModified;
+    uint attributes;
 
     version (Posix)
     {
         int ownerId;
         int groupId;
-        Permissions permissions;
     }
 }
 
@@ -309,13 +313,13 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
         return _data.timeLastModified;
     }
 
+    @property uint attributes()
+    {
+        return _data.attributes;
+    }
+
     version (Posix)
     {
-        @property Permissions permissions()
-        {
-            return _data.permissions;
-        }
-
         @property int ownerId()
         {
             return _data.ownerId;
@@ -365,7 +369,6 @@ private struct TarHeader
     in (block.length >= 512)
     {
         import std.algorithm : min;
-        import std.conv : octal;
         import std.string : toStringz;
 
         version (Posix)
@@ -384,7 +387,7 @@ private struct TarHeader
             th.prefix[0 .. prefLen] = name[0 .. prefLen];
         th.name[0 .. name.length - prefLen] = name[prefLen .. $];
 
-        th.typeflag = fromEntryType(file.type);
+        th.typeflag = toTypeflag(file.type);
 
         if (th.typeflag == Typeflag.symLink)
         {
@@ -397,14 +400,13 @@ private struct TarHeader
         {
             import core.sys.posix.grp;
             import core.sys.posix.pwd;
-
-            //import core.sys.posix.unistd;
             import core.stdc.string : strlen;
+            import std.conv : octal;
 
             const uid = file.ownerId;
             const gid = file.groupId;
 
-            toOctalString(cast(int) file.permissions, th.mode[0 .. $ - 1]);
+            toOctalString(file.attributes & octal!7777, th.mode[0 .. $ - 1]);
             toOctalString(uid, th.uid[0 .. $ - 1]);
             toOctalString(gid, th.gid[0 .. $ - 1]);
 
@@ -486,7 +488,7 @@ private enum Typeflag : ubyte
     contiguousFile = '7',
 }
 
-Typeflag fromEntryType(EntryType type)
+Typeflag toTypeflag(EntryType type)
 {
     final switch (type)
     {
@@ -509,6 +511,38 @@ EntryType toEntryType(Typeflag flag)
         return EntryType.symlink;
     default:
         return EntryType.regular;
+    }
+}
+
+version (Posix)
+{
+    // stat.st_mode part corresponding to file type
+    uint posixModeFileType(Typeflag flag)
+    {
+        import std.conv : octal;
+
+        final switch (flag)
+        {
+        case Typeflag.normalNul:
+        case Typeflag.normal:
+            return octal!100_000;
+        case Typeflag.hardLink:
+            // is regular file right for hard links?
+            return octal!100_000;
+        case Typeflag.symLink:
+            return octal!120_000;
+        case Typeflag.charSpecial:
+            return octal!20_000;
+        case Typeflag.blockSpecial:
+            return octal!60_000;
+        case Typeflag.directory:
+            return octal!40_000;
+        case Typeflag.fifo:
+            return octal!10_000;
+        case Typeflag.contiguousFile:
+            // is regular file right for contiguous files?
+            return octal!100_000;
+        }
     }
 }
 

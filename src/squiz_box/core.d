@@ -29,9 +29,17 @@ template isCreateEntryRange(I)
     enum isCreateEntryRange = isInputRange!I && is(ElementType!I : ArchiveCreateEntry);
 }
 
-static assert(isArchiveCreateEntryRange!(ArchiveCreateEntry[]));
+/// Static check that a type is an InputRange of ArchiveCreateEntry
+template isCreateEntryForwardRange(I)
+{
+    import std.range : ElementType, isForwardRange;
+
+    enum isCreateEntryForwardRange = isForwardRange!I && is(ElementType!I : ArchiveCreateEntry);
+}
 
 static assert(isCreateEntryRange!(ArchiveCreateEntry[]));
+static assert(isCreateEntryForwardRange!(ArchiveCreateEntry[]));
+
 /// Static check that a type is an InputRange of ArchiveExtractEntry
 template isExtractEntryRange(I)
 {
@@ -60,102 +68,6 @@ void writeBinaryFile(I)(I input, string filename) if (isByteRange!I)
     import std.stdio : File;
 
     input.copy(File(filename, "wb").lockingBinaryWriter);
-}
-
-version (Posix)
-{
-    import core.sys.posix.sys.types : mode_t;
-
-    enum Permissions
-    {
-        none = 0,
-
-        otherExec = 1 << 0,
-        otherWrit = 1 << 1,
-        otherRead = 1 << 2,
-
-        groupExec = 1 << 3,
-        groupWrit = 1 << 4,
-        groupRead = 1 << 5,
-
-        ownerExec = 1 << 6,
-        ownerWrit = 1 << 7,
-        ownerRead = 1 << 8,
-
-        permMask = (1 << 9) - 1,
-
-        setUid = 1 << 9,
-        setGid = 1 << 10,
-        sticky = 1 << 11,
-
-        specialMask = mask & ~permMask,
-
-        mask = (1 << 12) - 1,
-    }
-
-    Permissions posixModeToPerms(mode_t mode)
-    {
-        import core.sys.posix.sys.stat;
-
-        auto perm = Permissions.none;
-        if (mode & S_IXOTH)
-            perm |= Permissions.otherExec;
-        if (mode & S_IWOTH)
-            perm |= Permissions.otherWrit;
-        if (mode & S_IROTH)
-            perm |= Permissions.otherRead;
-        if (mode & S_IXGRP)
-            perm |= Permissions.groupExec;
-        if (mode & S_IWGRP)
-            perm |= Permissions.groupWrit;
-        if (mode & S_IRGRP)
-            perm |= Permissions.groupRead;
-        if (mode & S_IXUSR)
-            perm |= Permissions.ownerExec;
-        if (mode & S_IWUSR)
-            perm |= Permissions.ownerWrit;
-        if (mode & S_IRUSR)
-            perm |= Permissions.ownerRead;
-        if (mode & S_ISUID)
-            perm |= Permissions.setUid;
-        if (mode & S_ISGID)
-            perm |= Permissions.setGid;
-        if (mode & S_ISVTX)
-            perm |= Permissions.sticky;
-        return perm;
-    }
-
-    mode_t permsToPosixMode(Permissions perm)
-    {
-        import core.sys.posix.sys.stat;
-
-        mode_t mode = 0;
-        if ((perm & Permissions.otherExec) != Permissions.none)
-            mode |= S_IXOTH;
-        if ((perm & Permissions.otherWrit) != Permissions.none)
-            mode |= S_IWOTH;
-        if ((perm & Permissions.otherRead) != Permissions.none)
-            mode |= S_IROTH;
-        if ((perm & Permissions.groupExec) != Permissions.none)
-            mode |= S_IXGRP;
-        if ((perm & Permissions.groupWrit) != Permissions.none)
-            mode |= S_IWGRP;
-        if ((perm & Permissions.groupRead) != Permissions.none)
-            mode |= S_IRGRP;
-        if ((perm & Permissions.ownerExec) != Permissions.none)
-            mode |= S_IXUSR;
-        if ((perm & Permissions.ownerWrit) != Permissions.none)
-            mode |= S_IWUSR;
-        if ((perm & Permissions.ownerRead) != Permissions.none)
-            mode |= S_IRUSR;
-        if ((perm & Permissions.setUid) != Permissions.none)
-            mode |= S_ISUID;
-        if ((perm & Permissions.setGid) != Permissions.none)
-            mode |= S_ISGID;
-        if ((perm & Permissions.sticky) != Permissions.none)
-            mode |= S_ISVTX;
-        return mode;
-    }
 }
 
 /// Type of an archive entry
@@ -210,10 +122,11 @@ interface ArchiveEntry
     /// The timeLastModified of the entry
     @property SysTime timeLastModified();
 
+    /// The file attributes (as returned std.file.getLinkAttributes)
+    @property uint attributes();
+
     version (Posix)
     {
-        /// The posix permissions of the entry
-        @property Permissions permissions();
         /// The owner id of the entry
         @property int ownerId();
         /// The group id of the entry
@@ -245,7 +158,7 @@ interface ArchiveCreateEntry : ArchiveEntry
     /// A byte range to the content of the entry.
     /// Only relevant for regular files.
     /// Other types of entry will return an empty range.
-    ByteRange byChunk(size_t chunkSize = 4096);
+    ByteRange byChunk(size_t chunkSize = defaultChunkSize);
 
     /// Helper function that read the complete data of the entry (using byChunk).
     final ubyte[] readContent()
@@ -273,7 +186,7 @@ interface ArchiveExtractEntry : ArchiveEntry
     /// A byte range to the content of the entry.
     /// Only relevant for regular files.
     /// Other types of entry will return an empty range.
-    ByteRange byChunk(size_t chunkSize = 4096);
+    ByteRange byChunk(size_t chunkSize = defaultChunkSize);
 
     /// Helper function that read the complete data of the entry (using byChunk).
     final ubyte[] readContent()
@@ -294,7 +207,7 @@ interface ArchiveExtractEntry : ArchiveEntry
     /// Extract the entry to a file under the given base directory
     final void extractTo(string baseDirectory)
     {
-        import std.file : exists, isDir, mkdirRecurse, setTimes;
+        import std.file : exists, isDir, mkdirRecurse, setAttributes, setTimes;
         import std.path : buildNormalizedPath, dirName;
         import std.stdio : File;
 
@@ -314,35 +227,35 @@ interface ArchiveExtractEntry : ArchiveEntry
             mkdirRecurse(extractPath);
             break;
         case EntryType.symlink:
+            mkdirRecurse(dirName(extractPath));
             version (Posix)
             {
                 import core.sys.posix.unistd : lchown;
                 import std.file : symlink;
                 import std.string : toStringz;
 
-                mkdirRecurse(dirName(extractPath));
                 symlink(this.linkname, extractPath);
                 lchown(toStringz(extractPath), this.ownerId, this.groupId);
-                break;
             }
+            break;
         case EntryType.regular:
             mkdirRecurse(dirName(extractPath));
-            auto f = File(extractPath, "wb");
-            foreach (chunk; this.byChunk())
-            {
-                f.rawWrite(chunk);
-            }
-            f.close();
+
+            writeBinaryFile(this.byChunk(), extractPath);
 
             setTimes(extractPath, Clock.currTime, this.timeLastModified);
 
+            const attrs = this.attributes;
+            if (attrs != 0)
+            {
+                setAttributes(extractPath, attrs);
+            }
+
             version (Posix)
             {
-                import core.sys.posix.sys.stat : chmod;
                 import core.sys.posix.unistd : chown;
                 import std.string : toStringz;
 
-                chmod(toStringz(extractPath), this.permissions.permsToPosixMode());
                 chown(toStringz(extractPath), this.ownerId, this.groupId);
             }
             break;
@@ -437,6 +350,13 @@ class FileArchiveEntry : ArchiveCreateEntry
         return stdmtime(filePath);
     }
 
+    @property uint attributes()
+    {
+        import std.file : getAttributes;
+
+        return getAttributes(filePath);
+    }
+
     version (Posix)
     {
         import core.sys.posix.sys.stat : stat_t, stat;
@@ -456,13 +376,6 @@ class FileArchiveEntry : ArchiveCreateEntry
                 );
                 statFetched = true;
             }
-        }
-
-        @property Permissions permissions()
-        {
-            ensureStat();
-
-            return statStruct.st_mode.posixModeToPerms() & Permissions.permMask;
         }
 
         @property int ownerId()
