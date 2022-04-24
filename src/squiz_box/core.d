@@ -237,6 +237,21 @@ interface ArchiveExtractEntry : ArchiveEntry
                 symlink(this.linkname, extractPath);
                 lchown(toStringz(extractPath), this.ownerId, this.groupId);
             }
+            else version (Windows)
+            {
+                import core.sys.windows.winbase : CreateSymbolicLinkW, SYMBOLIC_LINK_FLAG_DIRECTORY;
+                import core.sys.windows.windows : DWORD;
+                import std.utf : toUTF16z;
+
+                DWORD flags;
+                // if not exists (yet - we don't control order of extraction)
+                // regular file is assumed
+                if (exists(extractPath) && isDir(extractPath))
+                {
+                    flags = SYMBOLIC_LINK_FLAG_DIRECTORY;
+                }
+                CreateSymbolicLinkW(extractPath.toUTF16z, this.linkname.toUTF16z, flags);
+            }
             break;
         case EntryType.regular:
             mkdirRecurse(dirName(extractPath));
