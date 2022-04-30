@@ -2,8 +2,9 @@ module squiz_box.priv;
 
 package(squiz_box):
 
-import squiz_box.core : isByteRange;
+import squiz_box.core : EntryType, isByteRange;
 
+import std.datetime.systime;
 import std.traits : isIntegral;
 
 extern(C) void* gcAlloc(T)(void* opaque, T n, T m)
@@ -27,9 +28,15 @@ extern(C) void gcFree(void* opaque, void* addr)
 /// ease the implementation of an algorithm
 interface DataInput
 {
+    /// Position in the stream (how many bytes read so far)
     @property size_t pos();
+    /// Whether end-of-input was reached
     @property bool eoi();
+    /// Fast-forward and discard dist bytes.
+    /// Passing size_t.max will exhaust the input.
     void ffw(size_t dist);
+    /// Read up to buffer.length bytes into buffer and return what was read.
+    /// Returns a smaller slice only if EOI was reached.
     ubyte[] read(ubyte[] buffer);
 }
 
@@ -122,6 +129,8 @@ class ByteRangeDataInput(BR) : DataInput if (isByteRange!BR)
                 _input.popFront();
                 if (!_input.empty)
                     _chunk = _input.front;
+                else
+                    break;
             }
         }
     }
@@ -147,6 +156,8 @@ class ByteRangeDataInput(BR) : DataInput if (isByteRange!BR)
                 _input.popFront();
                 if (!_input.empty)
                     _chunk = _input.front;
+                else
+                    break;
             }
         }
         return buffer[0 .. filled];
@@ -200,6 +211,24 @@ struct DataInputByteRange
             _chunk = null;
     }
 }
+
+struct EntryData
+{
+    string path;
+    string linkname;
+    EntryType type;
+    size_t size;
+    size_t entrySize;
+    SysTime timeLastModified;
+    uint attributes;
+
+    version (Posix)
+    {
+        int ownerId;
+        int groupId;
+    }
+}
+
 
 // Common algorithm for all compression/decompression functions.
 // I is a byte input range

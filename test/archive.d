@@ -9,6 +9,8 @@ import squiz_box.zip;
 
 import test.util;
 
+import std.typecons;
+
 string[] filesForArchive()
 {
     return [
@@ -108,7 +110,7 @@ void testZipArchiveContent(string archivePath)
     assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
 }
 
-void testExtractedFiles(DM)(auto ref DM dm)
+void testExtractedFiles(DM)(auto ref DM dm, Flag!"mode666" mode666)
 {
     import std.conv : octal;
     import std.digest : hexDigest;
@@ -119,7 +121,8 @@ void testExtractedFiles(DM)(auto ref DM dm)
     {
         assert(getLinkAttributes(dm.buildPath("file1.txt")) == octal!"100644");
         assert(getLinkAttributes(dm.buildPath("file 2.txt")) == octal!"100644");
-        assert(getLinkAttributes(dm.buildPath("folder", "chmod 666.txt")) == octal!"100666");
+        const m666 = mode666 ? octal!"100666" : octal!"100644";
+        assert(getLinkAttributes(dm.buildPath("folder", "chmod 666.txt")) == m666);
     }
 
     assert(hexDigest!SHA1(read(
@@ -220,7 +223,7 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm);
+    testExtractedFiles(dm, Yes.mode666);
 }
 
 @("Decompress and extract tar.gz")
@@ -239,7 +242,7 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm);
+    testExtractedFiles(dm, Yes.mode666);
 }
 
 @("Decompress and extract tar.bz2")
@@ -258,7 +261,7 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm);
+    testExtractedFiles(dm, Yes.mode666);
 }
 
 @("Decompress and extract tar.xz")
@@ -277,7 +280,7 @@ unittest
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm);
+    testExtractedFiles(dm, Yes.mode666);
 }
 
 @("Create Zip")
@@ -286,7 +289,7 @@ unittest
     import std.algorithm : map, sum;
     import std.file : read;
 
-    auto archive = Path("archive", ".zip");
+    auto archive = DeleteMe("archive", ".zip");
     auto base = testPath("data");
 
     filesForArchive()
@@ -295,4 +298,42 @@ unittest
         .writeBinaryFile(archive.path);
 
     testZipArchiveContent(archive.path);
+}
+
+@("Extract Zip")
+unittest
+{
+    import std.algorithm : each;
+    import std.file : mkdir;
+
+    const archive = testPath("data/archive.zip");
+    const dm = DeleteMe("extraction_site", null);
+
+    mkdir(dm.path);
+
+    readBinaryFile(archive)
+        .readZipArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    testExtractedFiles(dm, No.mode666);
+}
+
+@("Extract Zip squiz-box extra-flags")
+unittest
+{
+    import std.algorithm : each, map;
+    import std.file : mkdir;
+
+    const dm = DeleteMe("extraction_site", null);
+    auto base = testPath("data");
+
+    mkdir(dm.path);
+
+    filesForArchive()
+        .map!(p => fileEntryFromBase(p, base))
+        .createZipArchive()
+        .readZipArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    testExtractedFiles(dm, Yes.mode666);
 }

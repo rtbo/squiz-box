@@ -224,6 +224,7 @@ private struct ArchiveTarRead
         data.type = toEntryType(th.typeflag);
         data.linkname = parseString(th.linkname).idup;
         data.size = parseOctalString!size_t(th.size);
+        data.entrySize = 512 + next512(data.size);
         data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
         version (Posix)
         {
@@ -243,22 +244,6 @@ private struct ArchiveTarRead
 }
 
 static assert(isExtractEntryRange!ArchiveTarRead);
-
-private struct EntryData
-{
-    string path;
-    string linkname;
-    EntryType type;
-    size_t size;
-    SysTime timeLastModified;
-    uint attributes;
-
-    version (Posix)
-    {
-        int ownerId;
-        int groupId;
-    }
-}
 
 private class ArchiveTarExtractEntry : ArchiveExtractEntry
 {
@@ -304,8 +289,7 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
 
     @property size_t entrySize()
     {
-        // size taken by the header block + 512 bytes aligned content
-        return 512 + next512(_data.size);
+        return _data.entrySize;
     }
 
     @property SysTime timeLastModified()
