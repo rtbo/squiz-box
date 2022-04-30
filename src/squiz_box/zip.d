@@ -7,7 +7,7 @@ import squiz_box.priv;
 
 import std.exception;
 import std.traits : isIntegral;
-import std.range : isForwardRange;
+import std.range;
 
 auto createZipArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isCreateEntryRange!I)
@@ -390,13 +390,14 @@ private class Deflater
     }
 }
 
-auto readZipArchive(I)(I input) if (isByteRange!I)
+auto readZipArchive(I)(I input)
+if (isByteRange!I && !isRandomAccessRange!I)
 {
     auto dataInput = new ByteRangeDataInput!I(input);
-    return ZipArchiveRead(dataInput);
+    return ZipArchiveReadStream(dataInput);
 }
 
-private struct ZipArchiveRead
+private struct ZipArchiveReadStream
 {
     private DataInput input;
     private ArchiveExtractEntry currentEntry;
@@ -611,13 +612,58 @@ private class ZipArchiveExtractEntry : ArchiveExtractEntry
         );
 
         if (deflated)
-            return new Inflater(input, compressedSize, chunkSize, expectedCrc32);
+            return new InflateByChunk(input, compressedSize, chunkSize, expectedCrc32);
         else
-            return new Noop(input, compressedSize, chunkSize, expectedCrc32);
+            return new StoredByChunk(input, compressedSize, chunkSize, expectedCrc32);
     }
 }
 
-private class Noop : ByteRange
+/// common code between InflateByChunk and StoredByChunk
+private abstract class ZipByChunk : ByteRange
+{
+    ubyte[] moveFront()
+    {
+        throw new UnsupportedRangeMethod(
+            "Cannot move the front of a(n) Zip `Inflater`"
+        );
+    }
+
+    int opApply(scope int delegate(ubyte[]) dg)
+    {
+        int res;
+
+        while (!empty)
+        {
+            res = dg(front);
+            if (res)
+                break;
+            popFront();
+        }
+
+        return res;
+    }
+
+    int opApply(scope int delegate(size_t, ubyte[]) dg)
+    {
+        int res;
+
+        size_t i = 0;
+
+        while (!empty)
+        {
+            res = dg(i, front);
+            if (res)
+                break;
+            i++;
+            popFront();
+        }
+
+        return res;
+    }
+}
+
+/// implements byChunk for stored entries (no compression)
+private class StoredByChunk : ZipByChunk
 {
     DataInput input;
     size_t currentPos;
@@ -658,48 +704,6 @@ private class Noop : ByteRange
             prime();
     }
 
-    ubyte[] moveFront()
-    {
-        import std.range : UnsupportedRangeMethod;
-
-        throw new UnsupportedRangeMethod(
-            "Cannot move the front of a(n) Zip `Inflater`"
-        );
-    }
-
-    int opApply(scope int delegate(ubyte[]) dg)
-    {
-        int res;
-
-        while (!empty)
-        {
-            res = dg(front);
-            if (res)
-                break;
-            popFront();
-        }
-
-        return res;
-    }
-
-    int opApply(scope int delegate(size_t, ubyte[]) dg)
-    {
-        int res;
-
-        size_t i = 0;
-
-        while (!empty)
-        {
-            res = dg(i, front);
-            if (res)
-                break;
-            i++;
-            popFront();
-        }
-
-        return res;
-    }
-
     private void prime()
     {
         import std.algorithm : min;
@@ -726,7 +730,8 @@ private class Noop : ByteRange
     }
 }
 
-private class Inflater : ByteRange
+/// implements byChunk for deflated entries
+private class InflateByChunk : ZipByChunk
 {
     z_stream stream;
     DataInput input;
@@ -774,48 +779,6 @@ private class Inflater : ByteRange
         outChunk = null;
         if (!ended)
             prime();
-    }
-
-    ubyte[] moveFront()
-    {
-        import std.range : UnsupportedRangeMethod;
-
-        throw new UnsupportedRangeMethod(
-            "Cannot move the front of a(n) Zip `Inflater`"
-        );
-    }
-
-    int opApply(scope int delegate(ubyte[]) dg)
-    {
-        int res;
-
-        while (!empty)
-        {
-            res = dg(front);
-            if (res)
-                break;
-            popFront();
-        }
-
-        return res;
-    }
-
-    int opApply(scope int delegate(size_t, ubyte[]) dg)
-    {
-        int res;
-
-        size_t i = 0;
-
-        while (!empty)
-        {
-            res = dg(i, front);
-            if (res)
-                break;
-            i++;
-            popFront();
-        }
-
-        return res;
     }
 
     private void prime()
