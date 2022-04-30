@@ -14,7 +14,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [ ubuntu-latest ]
+        os: [ windows-latest ]
         dc: [ dmd-latest ]
         bt: [ debug ]
         meson: [ '0.62.0' ]
@@ -24,6 +24,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+
+      - name: Enable MS Developer Command Prompt
+        if: ${{ matrix.os == 'windows-latest' }}
+        uses: ilammy/msvc-dev-cmd@v1.7.0
 
       - name: Install D Compiler and Dub
         uses: dlang-community/setup-dlang@v1
@@ -35,7 +39,7 @@ jobs:
         with:
           action: test
           directory: build
-          setup-options: --buildtype=${{ matrix.bt }}
+          setup-options: --buildtype=${{ matrix.bt }} -Ddefault_library=static
           meson-version: ${{ matrix.meson }}
           options: --verbose
 
