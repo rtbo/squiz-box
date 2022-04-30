@@ -393,18 +393,18 @@ private class Deflater
 auto readZipArchive(I)(I input)
 if (isByteRange!I && !isRandomAccessRange!I)
 {
-    auto dataInput = new ByteRangeDataInput!I(input);
+    auto dataInput = new ByteRangeStream!I(input);
     return ZipArchiveReadStream(dataInput);
 }
 
 private struct ZipArchiveReadStream
 {
-    private DataInput input;
+    private Stream input;
     private ArchiveExtractEntry currentEntry;
     ubyte[] fieldBuf;
     size_t nextHeader;
 
-    this(DataInput input)
+    this(Stream input)
     {
         this.input = input;
         fieldBuf = new ubyte[ushort.max];
@@ -534,14 +534,14 @@ private struct ZipArchiveReadStream
 
 private class ZipArchiveExtractEntry : ArchiveExtractEntry
 {
-    DataInput input;
+    Stream input;
     size_t startPos;
     EntryData data;
     size_t compressedSize;
     uint expectedCrc32;
     bool deflated;
 
-    this(DataInput input, EntryData data, size_t compressedSize, uint expectedCrc32, bool deflated)
+    this(Stream input, EntryData data, size_t compressedSize, uint expectedCrc32, bool deflated)
     {
         this.input = input;
         this.startPos = input.pos;
@@ -665,7 +665,7 @@ private abstract class ZipByChunk : ByteRange
 /// implements byChunk for stored entries (no compression)
 private class StoredByChunk : ZipByChunk
 {
-    DataInput input;
+    Stream input;
     size_t currentPos;
     size_t size;
     ubyte[] outBuffer;
@@ -674,7 +674,7 @@ private class StoredByChunk : ZipByChunk
     uint expectedCrc32;
     bool ended;
 
-    this(DataInput input, size_t size, size_t chunkSize, uint expectedCrc32)
+    this(Stream input, size_t size, size_t chunkSize, uint expectedCrc32)
     {
         this.input = input;
         this.currentPos = input.pos;
@@ -734,7 +734,7 @@ private class StoredByChunk : ZipByChunk
 private class InflateByChunk : ZipByChunk
 {
     z_stream stream;
-    DataInput input;
+    Stream input;
     size_t currentPos;
     size_t compressedSz;
     ubyte[] outBuffer;
@@ -745,7 +745,7 @@ private class InflateByChunk : ZipByChunk
     uint expectedCrc32;
     bool ended;
 
-    this(DataInput input, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
+    this(Stream input, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
     {
         this.input = input;
         this.currentPos = input.pos;

@@ -7,15 +7,14 @@ import squiz_box.core : EntryType, isByteRange;
 import std.datetime.systime;
 import std.traits : isIntegral;
 
-extern(C) void* gcAlloc(T)(void* opaque, T n, T m)
-if (isIntegral!T)
+extern (C) void* gcAlloc(T)(void* opaque, T n, T m) if (isIntegral!T)
 {
     import core.memory : GC;
 
-    return GC.malloc(n*m);
+    return GC.malloc(n * m);
 }
 
-extern(C) void gcFree(void* opaque, void* addr)
+extern (C) void gcFree(void* opaque, void* addr)
 {
     import core.memory : GC;
 
@@ -26,7 +25,7 @@ extern(C) void gcFree(void* opaque, void* addr)
 /// This is used either as adapter to File reading
 /// or as adapter to by-chunk data where arbitrary read length
 /// ease the implementation of an algorithm
-interface DataInput
+interface Stream
 {
     /// Position in the stream (how many bytes read so far)
     @property size_t pos();
@@ -42,7 +41,7 @@ interface DataInput
 
 /// File based data input
 /// Includes possibility to slice in the data
-class FileDataInput : DataInput
+class FileStream : Stream
 {
     import std.stdio : File;
 
@@ -89,7 +88,7 @@ class FileDataInput : DataInput
 }
 
 /// Range based data input
-class ByteRangeDataInput(BR) : DataInput if (isByteRange!BR)
+class ByteRangeStream(BR) : Stream if (isByteRange!BR)
 {
     private BR _input;
     private size_t _pos;
@@ -164,16 +163,16 @@ class ByteRangeDataInput(BR) : DataInput if (isByteRange!BR)
     }
 }
 
-/// ByteRange that takes its data from DataInput.
+/// ByteRange that takes its data from Stream.
 /// Optionally stopping before data is exhausted.
-struct DataInputByteRange
+struct StreamByteRange
 {
-    private DataInput _input;
+    private Stream _input;
     private size_t _end;
     private ubyte[] _buffer;
     private ubyte[] _chunk;
 
-    this (DataInput input, size_t chunkSize = 4096, size_t end = size_t.max)
+    this(Stream input, size_t chunkSize = 4096, size_t end = size_t.max)
     {
         _input = input;
         _end = end;
@@ -228,7 +227,6 @@ struct EntryData
         int groupId;
     }
 }
-
 
 // Common algorithm for all compression/decompression functions.
 // I is a byte input range
