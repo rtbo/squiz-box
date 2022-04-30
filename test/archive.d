@@ -29,12 +29,20 @@ void testTarArchiveContent(string archivePath)
 
     const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
     const line2 = `^-rw-r--r-- .+ 3521 .+ file 2.txt$`;
-    const line3 = `^-rw-rw-rw- .+ 26 .+ folder/chmod 666.txt$`;
+    version(Posix)
+    {
+        const line3 = `^-rw-rw-rw- .+ 26 .+ folder/chmod 666.txt$`;
+    }
+    else
+    {
+        const line3 = `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
+    }
 
     auto res = execute(["tar", "-tvf", archivePath]);
     assert(res.status == 0);
     const lines = res.output.splitLines();
     assert(lines.length == 3);
+    debug { import std.stdio : writeln; try { writeln(res.output); } catch (Exception) {} }
     assert(matchFirst(lines[0], line1));
     assert(matchFirst(lines[1], line2));
     assert(matchFirst(lines[2], line3));
