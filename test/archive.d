@@ -14,20 +14,10 @@ import std.typecons;
 string[] filesForArchive()
 {
     return [
-        testPath("data/file1.txt"),
-        testPath("data/file 2.txt"),
-        testPath("data/folder/chmod 666.txt"),
+        dataGenPath("file1.txt"),
+        dataGenPath("file 2.txt"),
+        dataGenPath("folder/chmod 666.txt"),
     ];
-}
-
-version (Posix)
-{
-    shared static this()
-    {
-        import std.process;
-
-        execute(["chmod", "666", testPath("data/folder/chmod 666.txt")]);
-    }
 }
 
 void testTarArchiveContent(string archivePath)
@@ -139,7 +129,7 @@ unittest
     import std.file : read;
 
     auto archive = Path("archive", ".tar");
-    auto base = testPath("data");
+    auto base = dataGenPath();
 
     filesForArchive()
         .map!(p => fileEntryFromBase(p, base))
@@ -290,7 +280,7 @@ unittest
     import std.file : read;
 
     auto archive = DeleteMe("archive", ".zip");
-    auto base = testPath("data");
+    auto base = dataGenPath();
 
     filesForArchive()
         .map!(p => fileEntryFromBase(p, base))
@@ -325,7 +315,7 @@ unittest
     import std.file : mkdir;
 
     const dm = DeleteMe("extraction_site", null);
-    auto base = testPath("data");
+    auto base = dataGenPath();
 
     mkdir(dm.path);
 

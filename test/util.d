@@ -6,9 +6,45 @@ import std.file;
 import std.path;
 import std.string;
 
+private __gshared string _dataGenPath;
+
+shared static this()
+{
+    import std.range;
+
+    _dataGenPath = tempPath(null, "squiz-box-test", null);
+    mkdir(_dataGenPath);
+    mkdir(dataGenPath("folder"));
+
+    const ubyte[] content1 = cast(const(ubyte[]))"File 1\n";
+    const ubyte[] content2 = cast(const(ubyte[]))"file 2\n";
+    const ubyte[] content3 = cast(const(ubyte[]))"File with 666 permissions\n";
+
+    write(dataGenPath("file1.txt"), cast(const(void)[])content1);
+    repeat(content2).take(503).writeBinaryFile(dataGenPath("file 2.txt"));
+    write(dataGenPath("folder", "chmod 666.txt"), cast(const(void)[])content3);
+
+    version (Posix)
+    {
+        import std.process;
+
+        execute(["chmod", "666", dataGenPath("folder", "chmod 666.txt")]);
+    }
+}
+
+shared static ~this()
+{
+    rmdirRecurse(_dataGenPath);
+}
+
+string dataGenPath(Args...)(Args args)
+{
+    return buildNormalizedPath(_dataGenPath, args);
+}
+
 string testPath(Args...)(Args args)
 {
-    return buildNormalizedPath(dirName(__FILE_FULL_PATH__), args);
+    return buildNormalizedPath(__FILE_FULL_PATH__.dirName(), args);
 }
 
 /// Defines a path in a temporary location
