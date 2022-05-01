@@ -101,14 +101,14 @@ struct Path
 /// The data contains _num_ bytes in the form of 64 bits integers,
 /// starting at _start_ and stepping by _step_.
 /// Both num and chunkSize must be a multiple of 8 byte
-auto generateLargeData(size_t num, long start, long step, size_t chunkSize = 8192)
+auto generateSequentialData(size_t num, long start, long step, size_t chunkSize = 8192)
 {
     assert(num % 8 == 0);
     assert(chunkSize % 8 == 0);
-    return LargeDataGen(num, start, step, chunkSize);
+    return SequentialDataGen(num, start, step, chunkSize);
 }
 
-private struct LargeDataGen
+private struct SequentialDataGen
 {
     size_t num;
     long current;
@@ -168,9 +168,9 @@ private struct LargeDataGen
     }
 }
 
-static assert(isByteRange!LargeDataGen);
+static assert(isByteRange!SequentialDataGen);
 
-@("generateLargeData")
+@("generateSequentialData")
 unittest
 {
     import std.file : getSize;
@@ -179,7 +179,7 @@ unittest
 
     const size_t len = 1_203_960;
 
-    generateLargeData(len, 1403, 127)
+    generateSequentialData(len, 1403, 127)
         .writeBinaryFile(dm.path);
 
     assert(getSize(dm.path) == len);

@@ -48,7 +48,7 @@ unittest
             sha.put(bytes);
             return true;
         }
-        generateLargeData(len, 1239, 13, 8192)
+        generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
             .compressGz(6, 8192)
             .writeBinaryFile(dataGz.path);
@@ -122,7 +122,7 @@ unittest
             sha.put(bytes);
             return true;
         }
-        generateLargeData(len, 1239, 13, 8192)
+        generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
             .compressBz2(8192)
             .writeBinaryFile(dm.path);
@@ -203,7 +203,7 @@ unittest
             sha.put(bytes);
             return true;
         }
-        generateLargeData(len, 1239, 13, 8192)
+        generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
             .compressXz(6, 8192)
             .writeBinaryFile(dataXz.path);
