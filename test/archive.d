@@ -324,7 +324,7 @@ unittest
         .readZipArchive()
         .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm, No.mode666);
+    testExtractedFiles(dm, Yes.mode666);
 }
 
 @("Extract Zip squiz-box extra-flags")

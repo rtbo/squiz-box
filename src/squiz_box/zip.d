@@ -529,7 +529,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
 
                 version (Posix)
                 {
-                    if ((header.versionMadeBy.val & 0xff00) == 0x3000)
+                    if ((header.versionMadeBy.val & 0xff00) == 0x0300)
                         info.attributes = header.externalFileAttributes.val >> 16;
                     else
                         info.attributes = 0;
