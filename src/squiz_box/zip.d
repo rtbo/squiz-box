@@ -8,6 +8,7 @@ import squiz_box.priv;
 import std.exception;
 import std.traits : isIntegral;
 import std.range;
+import std.stdio : File;
 
 auto createZipArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isCreateEntryRange!I)
@@ -390,30 +391,61 @@ private class Deflater
     }
 }
 
-auto readZipArchive(I)(I input)
-if (isByteRange!I && !isRandomAccessRange!I)
+auto readZipArchive(I)(I input) if (isByteRange!I)
 {
-    auto dataInput = new ByteRangeStream!I(input);
-    return ZipArchiveReadStream(dataInput);
+    auto stream = new ByteRangeStream!I(input);
+    return ZipArchiveRead!Stream(stream);
 }
 
-private struct ZipArchiveReadStream
+auto readZipArchive(File input)
 {
-    private Stream input;
+    auto stream = new FileStream(input);
+    return ZipArchiveRead!SearchableStream(stream);
+}
+
+auto readZipArchive(ubyte[] zipData)
+{
+    auto stream = new ArrayStream(zipData);
+    return ZipArchiveRead!SearchableStream(stream);
+}
+
+private struct ZipArchiveRead(I) if (is(I : Stream))
+{
+    enum isSearchable = is(I : SearchableStream);
+
+    private I input;
     private ArchiveExtractEntry currentEntry;
     ubyte[] fieldBuf;
     size_t nextHeader;
 
-    this(Stream input)
+    static if (isSearchable)
+    {
+        struct CentralDirInfo
+        {
+            ulong numEntries;
+            ulong pos;
+            ulong size;
+        }
+
+        ZipEntryInfo[string] centralDirectory;
+    }
+
+    this(I input)
     {
         this.input = input;
         fieldBuf = new ubyte[ushort.max];
-        readEntryHeader();
+
+        static if (isSearchable)
+        {
+            readCentralDirectory();
+        }
+
+        readEntry();
     }
 
     @property bool empty()
     {
-        return input.eoi;
+        return !currentEntry;
     }
 
     @property ArchiveExtractEntry front()
@@ -432,85 +464,181 @@ private struct ZipArchiveReadStream
             const dist = nextHeader - input.pos;
             input.ffw(dist);
         }
-        readEntryHeader();
+        currentEntry = null;
+        readEntry();
     }
 
-    private void readEntryHeader()
+    static if (isSearchable)
     {
-        import std.datetime.systime : DosFileTimeToSysTime, unixTimeToStdTime, SysTime;
-
-        LocalFileHeader header;
-        auto ptr = cast(ubyte*)&header;
-        auto buffer = ptr[0 .. LocalFileHeader.sizeof];
-        auto read = input.read(buffer);
-        if (read.length >= 4 && header.signature == CentralFileHeader.expectedSignature)
+        private void readCentralDirectory()
         {
-            // we've gone through all entries, we have no interest in the central directory
-            input.ffw(size_t.max);
-            return;
+            import std.datetime.systime : DosFileTimeToSysTime;
+
+            auto cdi = readCentralDirInfo();
+            input.seek(cdi.pos);
+
+            while (cdi.numEntries != 0)
+            {
+                CentralFileHeader header = void;
+                input.read(&header);
+                enforce(
+                    header.signature == CentralFileHeader.expectedSignature,
+                    "Corrupted Zip: Expected Central directory header"
+                );
+
+                ZipEntryInfo info = void;
+
+                info.path = cast(string)(input.readLength(header.fileNameLength.val).idup);
+                const extraFieldData = input.readLength(header.extraFieldLength.val);
+
+                const efInfo = parseExtraFields(extraFieldData);
+                if (header.fileCommentLength.val)
+                    input.ffw(header.fileCommentLength.val);
+
+                fillEntryInfo(info, efInfo, header);
+
+                // will be added later to entrySize: LocalFileHeader size + name and extra fields
+                info.entrySize = info.compressedSize +
+                    CentralFileHeader.sizeof +
+                    header.fileNameLength.val +
+                    header.extraFieldLength.val +
+                    header.fileCommentLength.val;
+
+                version(Posix)
+                {
+                    if ((header.versionMadeBy.val & 0xff00) == 0x3000)
+                        info.attributes = header.externalFileAttributes.val >> 16;
+                    else
+                        info.attributes = 0;
+                }
+                else
+                {
+                    if ((header.versionMadeBy.val & 0xff00) == 0x0000)
+                        info.attributes = header.externalFileAttributes.val;
+                    else
+                        info.attributes = 0;
+                }
+
+                cdi.numEntries -= 1;
+
+                centralDirectory[info.path] = info;
+            }
+
+            input.seek(0);
         }
-        enforce(
-            read.length >= 4 && header.signature == LocalFileHeader.expectedSignature,
-            "Expected a Zip local header signature. File could be corrupted or not a Zip file."
-        );
-        enforce(read.length == buffer.length, "Unexpected end of input");
 
-        const flag = cast(ZipFlag) header.flag.val;
-        enforce((flag & ZipFlag.encryption) == ZipFlag.none, "Zip encryption unsupported");
-        enforce((flag & ZipFlag.dataDescriptor) == ZipFlag.none, "Zip format unsupported (data descriptor)");
-
-        enforce(
-            header.compressionMethod.val == 0 || header.compressionMethod.val == 8,
-            "Unsupported Zip compression method"
-        );
-
-        // TODO check for presence of encryption header and data descriptor
-        auto path = cast(string) input.read(fieldBuf[0 .. header.fileNameLength.val]).idup;
-        enforce(path.length == header.fileNameLength.val, "Unexpected end of input");
-        auto extraField = input.read(fieldBuf[0 .. header.extraFieldLength.val]).dup;
-        enforce(extraField.length == header.extraFieldLength.val, "Unexpected end of input");
-
-        EntryData data;
-        data.path = path;
-        data.type = EntryType.regular;
-        data.size = header.uncompressedSize.val;
-        size_t compressedSz = header.compressedSize.val;
-
-        data.timeLastModified = DosFileTimeToSysTime(header.lastModDosTime.val);
-
-        while (extraField.length != 0)
+        private CentralDirInfo readCentralDirInfo()
         {
-            enforce(extraField.length >= 4, "Corrupted Zip File (incomplete extra-field)");
+            import std.algorithm : max;
 
-            auto efh = cast(ExtraFieldHeader*) extraField.ptr;
+            enforce(
+                input.size > EndOfCentralDirectory.sizeof, "Not a Zip file"
+            );
+            size_t pos = input.size - EndOfCentralDirectory.sizeof;
+            enum maxCommentSz = 0xffff;
+            const size_t stopSearch = max(pos, maxCommentSz) - maxCommentSz;
+            while (pos != stopSearch)
+            {
+                input.seek(pos);
+                EndOfCentralDirectory record = void;
+                input.read(&record);
+                if (record.signature == EndOfCentralDirectory.expectedSignature)
+                {
+                    enforce(
+                        record.thisDisk == 0 && record.centralDirDisk == 0,
+                        "multi-disk Zip archives are not supported"
+                    );
+                    if (record.centralDirEntries == 0xffff ||
+                        record.centralDirOffset == 0xffff_ffff ||
+                        record.centralDirSize == 0xffff_ffff)
+                    {
+                        return readZip64CentralDirInfo(pos);
+                    }
+                    return CentralDirInfo(
+                        record.centralDirEntries.val,
+                        record.centralDirOffset.val,
+                        record.centralDirSize.val,
+                    );
+                }
+                // we are likely in the zip file comment.
+                // we continue backward until we hit the signature
+                // of the end of central directory record
+                pos -= 1;
+            }
+            throw new Exception("Corrupted Zip: Could not find end of central directory record");
+        }
 
-            const efLen = efh.size.val + 4;
-            enforce(extraField.length >= efLen, "Corrupted Zip file (incomplete extra-field)");
+        private CentralDirInfo readZip64CentralDirInfo(size_t endCentralDirRecordPos)
+        {
+            enforce(
+                endCentralDirRecordPos > Zip64EndOfCentralDirLocator.sizeof,
+                "Corrupted Zip: Not enough bytes"
+            );
 
-            switch (efh.id.val)
+            input.seek(endCentralDirRecordPos - Zip64EndOfCentralDirLocator.sizeof);
+            Zip64EndOfCentralDirLocator locator = void;
+            input.read(&locator);
+            enforce(
+                locator.signature == Zip64EndOfCentralDirLocator.expectedSignature,
+                "Corrupted Zip: Expected Zip64 end of central directory locator"
+            );
+
+            input.seek(locator.zip64EndOfCentralDirRecordOffset.val);
+            Zip64EndOfCentralDirRecord record = void;
+            input.read(&record);
+            enforce(
+                record.signature == Zip64EndOfCentralDirRecord.expectedSignature,
+                "Corrupted Zip: Expected Zip64 end of central directory record"
+            );
+
+            return CentralDirInfo(
+                record.centralDirEntries.val,
+                record.centralDirOffset.val,
+                record.centralDirSize.val,
+            );
+        }
+    }
+
+    private ExtraFieldInfo parseExtraFields(const(ubyte)[] data)
+    {
+        ExtraFieldInfo info;
+
+        while (data.length != 0)
+        {
+            enforce(data.length >= 4, "Corrupted Zip File (incomplete extra-field)");
+
+            auto header = cast(const(ExtraFieldHeader)*) data.ptr;
+
+            const efLen = header.size.val + 4;
+            enforce(data.length >= efLen, "Corrupted Zip file (incomplete extra-field)");
+
+            switch (header.id.val)
             {
             case Zip64ExtraField.expectedId:
-                auto ef = cast(Zip64ExtraField*) extraField.ptr;
-                data.size = ef.uncompressedSize.val;
-                compressedSz = ef.compressedSize.val;
+                info.fields |= KnownExtraField.zip64;
+                auto ef = cast(Zip64ExtraField*) data.ptr;
+                info.uncompressedSize = ef.uncompressedSize.val;
+                info.compressedSize = ef.compressedSize.val;
+                info.headerPos = ef.headerPos.val;
                 break;
             case SquizBoxExtraField.expectedId:
-                auto ef = cast(SquizBoxExtraField*) extraField.ptr;
-                data.attributes = ef.attributes.val;
+                info.fields |= KnownExtraField.squizBox;
+                auto ef = cast(SquizBoxExtraField*) data.ptr;
+                info.attributes = ef.attributes.val;
                 break;
                 // dfmt off
             version (Posix)
             {
                 case UnixExtraField.expectedId:
-                    auto ef = cast(UnixExtraField*) extraField.ptr;
-                    data.timeLastModified = SysTime(unixTimeToStdTime(ef.mtime.val));
-                    data.ownerId = ef.uid.val;
-                    data.groupId = ef.gid.val;
+                    info.fields |= KnownExtraField.unix;
+                    auto ef = cast(UnixExtraField*) data.ptr;
+                    info.timeLastModified = SysTime(unixTimeToStdTime(ef.mtime.val));
+                    info.ownerId = ef.uid.val;
+                    info.groupId = ef.gid.val;
                     if (efLen > UnixExtraField.sizeof)
                     {
-                        data.linkname = cast(string)
-                            extraField[UnixExtraField.sizeof .. efLen].idup;
-                        data.type = EntryType.symlink;
+                        info.linkname = cast(string)
+                            data[UnixExtraField.sizeof .. efLen].idup;
                     }
                     break;
             }
@@ -519,16 +647,181 @@ private struct ZipArchiveReadStream
                 break;
             }
 
-            extraField = extraField[efLen .. $];
+            data = data[efLen .. $];
         }
 
-        data.entrySize = header.totalLength() + compressedSz;
+        return info;
+    }
 
-        nextHeader = input.pos + compressedSz;
-
-        currentEntry = new ZipArchiveExtractEntry(
-            input, data, compressedSz, header.crc32.val, header.compressionMethod.val == 8
+    private void fillEntryInfo(H)(ref ZipEntryInfo info, const ref ExtraFieldInfo efInfo, const ref H header)
+            if (is(H == LocalFileHeader) || is(H == CentralFileHeader))
+    {
+        const flag = cast(ZipFlag) header.flag.val;
+        enforce(
+            (flag & ZipFlag.encryption) == ZipFlag.none,
+            "Zip encryption unsupported"
         );
+        enforce(
+            (flag & ZipFlag.dataDescriptor) == ZipFlag.none,
+            "Zip format unsupported (data descriptor)"
+        );
+        enforce(
+            header.compressionMethod.val == 0 || header.compressionMethod.val == 8,
+            "Unsupported Zip compression method"
+        );
+
+        info.deflated = header.compressionMethod.val == 8;
+        info.expectedCrc32 = header.crc32.val;
+
+        if (efInfo.has(KnownExtraField.zip64))
+        {
+            info.size = efInfo.uncompressedSize;
+            info.compressedSize = efInfo.compressedSize;
+        }
+        else
+        {
+            info.size = header.uncompressedSize.val;
+            info.compressedSize = header.compressedSize.val;
+        }
+
+        if (efInfo.has(KnownExtraField.squizBox))
+        {
+            info.attributes = efInfo.attributes;
+        }
+
+        info.type = info.compressedSize == 0 ? EntryType.directory : EntryType.regular;
+
+        version (Posix)
+        {
+            if (efInfo.has(KnownExtraField.unix))
+            {
+                info.linkname = efInfo.linkname;
+                if (info.linkname)
+                    info.type = EntryType.symlink;
+                info.timeLastModified = efInfo.timeLastModified;
+                info.ownerId = efInfo.ownerId;
+                info.groupId = efInfo.groupId;
+            }
+            else
+            {
+                info.timeLastModified = DosFileTimeToSysTime(header.lastModDosTime.val);
+            }
+        }
+        else
+        {
+            info.timeLastModified = DosFileTimeToSysTime(header.lastModDosTime.val);
+        }
+
+    }
+
+    private void readEntry()
+    {
+        import std.datetime.systime : DosFileTimeToSysTime, unixTimeToStdTime, SysTime;
+
+        LocalFileHeader header = void;
+        input.read(&header);
+        if (header.signature == CentralFileHeader.expectedSignature)
+        {
+            // we've gone through all entries, we have no interest in the central directory
+            input.ffw(size_t.max);
+            return;
+        }
+
+        enforce(
+            header.signature == LocalFileHeader.expectedSignature,
+            "Corrupted Zip: Expected a Zip local header signature."
+        );
+
+        // TODO check for presence of encryption header and data descriptor
+        const path = cast(string) input.read(fieldBuf[0 .. header.fileNameLength.val]).idup;
+        enforce(path.length == header.fileNameLength.val, "Unexpected end of input");
+
+        const extraFieldData = input.read(fieldBuf[0 .. header.extraFieldLength.val]);
+        enforce(extraFieldData.length == header.extraFieldLength.val, "Unexpected end of input");
+
+        const efInfo = parseExtraFields(extraFieldData);
+
+        static if (isSearchable)
+        {
+            auto info = centralDirectory[path];
+            info.entrySize += header.totalLength();
+        }
+        else
+        {
+            ZipEntryInfo info;
+            info.path = path;
+            fillEntryInfo(info, efInfo, header);
+            // educated guess for the size in the central directory
+            info.entrySize = header.totalLength() +
+                info.compressedSize +
+                CentralFileHeader.sizeof +
+                path.length +
+                extraFieldData.length;
+            if (efInfo.has(KnownExtraField.squizBox))
+            {
+                // central directory do not have squiz box extra field
+                info.entrySize -= SquizBoxExtraField.sizeof;
+            }
+        }
+
+        nextHeader = input.pos + info.compressedSize;
+
+        currentEntry = new ZipArchiveExtractEntry(input, info);
+    }
+}
+
+private struct ZipEntryInfo
+{
+    string path;
+    string linkname;
+    EntryType type;
+    size_t size;
+    size_t entrySize;
+    size_t compressedSize;
+    SysTime timeLastModified;
+    uint attributes;
+    bool deflated;
+    uint expectedCrc32;
+
+    version (Posix)
+    {
+        int ownerId;
+        int groupId;
+    }
+}
+
+private enum KnownExtraField
+{
+    none = 0,
+    zip64 = 1,
+    unix = 2,
+    squizBox = 4,
+}
+
+private struct ExtraFieldInfo
+{
+    KnownExtraField fields;
+
+    // zip64
+    ulong uncompressedSize;
+    ulong compressedSize;
+    ulong headerPos;
+
+    // unix
+    version (Posix)
+    {
+        string linkname;
+        SysTime timeLastModified;
+        int ownerId;
+        int groupId;
+    }
+
+    // squizBox
+    uint attributes;
+
+    bool has(KnownExtraField f) const
+    {
+        return (fields & f) != KnownExtraField.none;
     }
 }
 
@@ -536,19 +829,13 @@ private class ZipArchiveExtractEntry : ArchiveExtractEntry
 {
     Stream input;
     size_t startPos;
-    EntryData data;
-    size_t compressedSize;
-    uint expectedCrc32;
-    bool deflated;
+    ZipEntryInfo info;
 
-    this(Stream input, EntryData data, size_t compressedSize, uint expectedCrc32, bool deflated)
+    this(Stream input, ZipEntryInfo info)
     {
         this.input = input;
         this.startPos = input.pos;
-        this.data = data;
-        this.compressedSize = compressedSize;
-        this.expectedCrc32 = expectedCrc32;
-        this.deflated = deflated;
+        this.info = info;
     }
 
     @property EntryMode mode()
@@ -558,49 +845,49 @@ private class ZipArchiveExtractEntry : ArchiveExtractEntry
 
     @property string path()
     {
-        return data.path;
+        return info.path;
     }
 
     @property EntryType type()
     {
-        return data.type;
+        return info.type;
     }
 
     @property string linkname()
     {
-        return data.linkname;
+        return info.linkname;
     }
 
     @property size_t size()
     {
-        return data.size;
+        return info.size;
     }
 
     @property size_t entrySize()
     {
-        return data.entrySize;
+        return info.entrySize;
     }
 
     @property SysTime timeLastModified()
     {
-        return data.timeLastModified;
+        return info.timeLastModified;
     }
 
     @property uint attributes()
     {
-        return data.attributes;
+        return info.attributes;
     }
 
     version (Posix)
     {
         @property int ownerId()
         {
-            return data.ownerId;
+            return info.ownerId;
         }
 
         @property int groupId()
         {
-            return data.groupId;
+            return info.groupId;
         }
     }
 
@@ -611,10 +898,10 @@ private class ZipArchiveExtractEntry : ArchiveExtractEntry
             "Data cursor has moved, this entry is not valid anymore"
         );
 
-        if (deflated)
-            return new InflateByChunk(input, compressedSize, chunkSize, expectedCrc32);
+        if (info.deflated)
+            return new InflateByChunk(input, info.compressedSize, chunkSize, info.expectedCrc32);
         else
-            return new StoredByChunk(input, compressedSize, chunkSize, expectedCrc32);
+            return new StoredByChunk(input, info.compressedSize, chunkSize, info.expectedCrc32);
     }
 }
 
@@ -829,7 +1116,6 @@ private class InflateByChunk : ZipByChunk
                 break;
             }
         }
-
     }
 }
 
@@ -952,6 +1238,33 @@ private struct CentralFileHeader
     }
 }
 
+private struct Zip64EndOfCentralDirRecord
+{
+    enum expectedSignature = 0x06064b50;
+
+    LittleEndian!4 signature;
+    LittleEndian!8 zip64EndOfCentralDirRecordSize;
+    LittleEndian!2 versionMadeBy;
+    LittleEndian!2 extractVersion;
+    LittleEndian!4 thisDisk;
+    LittleEndian!4 centralDirDisk;
+    LittleEndian!8 centralDirEntriesOnThisDisk;
+    LittleEndian!8 centralDirEntries;
+    LittleEndian!8 centralDirSize;
+    LittleEndian!8 centralDirOffset;
+
+}
+
+private struct Zip64EndOfCentralDirLocator
+{
+    enum expectedSignature = 0x07064b50;
+
+    LittleEndian!4 signature;
+    LittleEndian!4 zip64EndOfCentralDirDisk;
+    LittleEndian!8 zip64EndOfCentralDirRecordOffset;
+    LittleEndian!4 diskCount;
+}
+
 private struct EndOfCentralDirectory
 {
     enum expectedSignature = 0x06054b50;
@@ -993,6 +1306,8 @@ private struct EndOfCentralDirectory
 
 static assert(LocalFileHeader.sizeof == 30);
 static assert(CentralFileHeader.sizeof == 46);
+static assert(Zip64EndOfCentralDirRecord.sizeof == 56);
+static assert(Zip64EndOfCentralDirLocator.sizeof == 20);
 static assert(EndOfCentralDirectory.sizeof == 22);
 
 private struct ExtraFieldHeader
@@ -1009,9 +1324,11 @@ private struct Zip64ExtraField
     LittleEndian!2 size;
     LittleEndian!8 uncompressedSize;
     LittleEndian!8 compressedSize;
-    LittleEndian!8 relHeaderOffset;
+    LittleEndian!8 headerPos;
     LittleEndian!4 diskStartNumber;
 }
+
+static assert(Zip64ExtraField.sizeof == 32);
 
 version (Posix)
 {

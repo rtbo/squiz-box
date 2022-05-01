@@ -308,6 +308,25 @@ unittest
     testExtractedFiles(dm, No.mode666);
 }
 
+@("Extract Zip Searchable stream")
+unittest
+{
+    import std.algorithm : each;
+    import std.file : mkdir;
+    import std.stdio : File;
+
+    const archive = testPath("data/archive.zip");
+    const dm = DeleteMe("extraction_site", null);
+
+    mkdir(dm.path);
+
+    File(archive, "rb")
+        .readZipArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    testExtractedFiles(dm, No.mode666);
+}
+
 @("Extract Zip squiz-box extra-flags")
 unittest
 {

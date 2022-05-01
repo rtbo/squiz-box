@@ -2,10 +2,10 @@ module squiz_box.priv;
 
 package(squiz_box):
 
-import squiz_box.core : EntryType, isByteRange;
+import squiz_box.core : defaultChunkSize, EntryType, isByteRange;
 
 import std.datetime.systime;
-import std.traits : isIntegral;
+import std.traits : isDynamicArray, isIntegral;
 
 extern (C) void* gcAlloc(T)(void* opaque, T n, T m) if (isIntegral!T)
 {
@@ -29,63 +29,47 @@ interface Stream
 {
     /// Position in the stream (how many bytes read so far)
     @property size_t pos();
+
     /// Whether end-of-input was reached
     @property bool eoi();
+
     /// Fast-forward and discard dist bytes.
     /// Passing size_t.max will exhaust the input.
     void ffw(size_t dist);
+
     /// Read up to buffer.length bytes into buffer and return what was read.
     /// Returns a smaller slice only if EOI was reached.
     ubyte[] read(ubyte[] buffer);
+
+    /// Read T.sizeof data and returns it as a T.
+    void read(T)(T* val)
+    if (!isDynamicArray!T)
+    {
+        import std.exception : enforce;
+
+        auto ptr = cast(ubyte*)val;
+        auto buf = ptr[0 .. T.sizeof];
+        auto res = read(buf);
+        enforce(res.length == T.sizeof, "Could not read enough bytes for " ~ T.stringof);
+    }
 }
 
-/// File based data input
-/// Includes possibility to slice in the data
-class FileStream : Stream
+/// Common interface between File and ubyte[].
+/// Similar to Stream, but allows to seek backwards.
+/// Implementers other than ubyte[] MUST have internal buffer.
+interface SearchableStream : Stream
 {
-    import std.stdio : File;
+    /// Complete size of the data
+    @property size_t size();
 
-    File _file;
-    size_t _pos;
-    size_t _end;
+    /// Seek to a position (relative to beginning)
+    void seek(size_t pos);
 
-    this(File file, size_t start = 0, size_t end = size_t.max)
-    {
-        _file = file;
-        _file.seek(start);
-        _end = (end == size_t.max ? _file.size : end) - start;
-    }
-
-    @property size_t pos()
-    {
-        return _pos;
-    }
-
-    @property bool eoi()
-    {
-        return _pos >= _end;
-    }
-
-    void ffw(size_t dist)
-    {
-        import std.algorithm : min;
-        import std.stdio : SEEK_CUR;
-
-        dist = min(dist, _end - _pos);
-        _file.seek(dist, SEEK_CUR);
-        _pos += dist;
-    }
-
-    ubyte[] read(ubyte[] buffer)
-    {
-        import std.algorithm : min;
-
-        const len = min(buffer.length, _end - _pos);
-        auto result = _file.rawRead(buffer[0 .. len]);
-        _pos += result.length;
-        return result;
-    }
+    /// Read up to len bytes and return what was read.
+    /// Returns an array smaller than len only if EOI was reached, or if internal buffer is too small.
+    ubyte[] readLength(size_t len);
 }
+
 
 /// Range based data input
 class ByteRangeStream(BR) : Stream if (isByteRange!BR)
@@ -160,6 +144,148 @@ class ByteRangeStream(BR) : Stream if (isByteRange!BR)
             }
         }
         return buffer[0 .. filled];
+    }
+}
+
+class ArrayStream : SearchableStream
+{
+    private ubyte[] _array;
+    private size_t _pos;
+
+    this(ubyte[] array)
+    {
+        _array = array;
+    }
+
+    @property size_t pos()
+    {
+        return _pos;
+    }
+
+    @property bool eoi()
+    {
+        return _pos == _array.length;
+    }
+
+    @property size_t size()
+    {
+        return _array.length;
+    }
+
+    void seek(size_t pos)
+    {
+        import std.algorithm : min;
+
+        _pos = min(pos, _array.length);
+    }
+
+    void ffw(size_t dist)
+    {
+        seek(pos + dist);
+    }
+
+    ubyte[] readLength(size_t len)
+    {
+        import std.algorithm : min;
+
+        const l = min(len, _array.length - _pos);
+        const p = _pos;
+        _pos += l;
+        return _array[p .. p + l];
+    }
+
+    ubyte[] read(ubyte[] buffer)
+    {
+        import std.algorithm : min;
+
+        const l = min(buffer.length, _array.length - _pos);
+        buffer[0 .. l] = _array[_pos .. _pos + l];
+        _pos += l;
+        return buffer[0 .. l];
+    }
+}
+
+class FileStream : SearchableStream
+{
+    import std.stdio : File;
+
+    File _file;
+    size_t _pos;
+    size_t _start;
+    size_t _end;
+    ubyte[] _buffer;
+
+    this(File file, size_t bufferSize = defaultChunkSize, size_t start = 0, size_t end = size_t.max)
+    in (start <= end)
+    {
+        import std.algorithm : min;
+        import std.exception : enforce;
+        import std.stdio : LockType;
+
+        enforce(file.isOpen, "File is not open");
+        file.lock(LockType.read);
+        _file = file;
+        _start = start;
+
+        const fs = file.size;
+        enforce(fs < ulong.max, "File is not searchable");
+        _end = min(fs, end);
+        enforce(_start <= _end, "Bounds out of File range");
+
+        const bufSize = min(bufferSize, _end - _start);
+        if (bufSize > 0)
+            _buffer = new ubyte[bufSize];
+    }
+
+    @property size_t pos()
+    {
+        return _pos;
+    }
+
+    @property bool eoi()
+    {
+        return _pos == _end;
+    }
+
+    @property size_t size()
+    {
+        return _end - _start;
+    }
+
+    void seek(size_t pos)
+    {
+        _pos = pos;
+    }
+
+    void ffw(size_t dist)
+    {
+        seek(pos + dist);
+    }
+
+    ubyte[] readLength(size_t len)
+    {
+        import std.algorithm : min;
+
+        assert(_buffer.length > 0, "FileDataAdapter constructed without buffer. Use read(buffer)");
+
+        const l = min(len, _end - _pos, _buffer.length);
+        _file.seek(_pos);
+        auto res = _file.rawRead(_buffer[0 .. l]);
+        _pos += res.length;
+        assert(_pos <= _end);
+        return res;
+    }
+
+    ubyte[] read(ubyte[] buffer)
+    {
+        import std.algorithm : min;
+
+        const len = min(buffer.length, _end - _pos);
+        _file.seek(_pos);
+        auto result = _file.rawRead(buffer[0 .. len]);
+        _pos += result.length;
+        assert(_pos <= _end);
+        return result;
     }
 }
 
