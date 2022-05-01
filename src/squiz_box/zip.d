@@ -415,27 +415,27 @@ private class Deflater
 
 auto readZipArchive(I)(I input) if (isByteRange!I)
 {
-    auto stream = new ByteRangeStream!I(input);
-    return ZipArchiveRead!Stream(stream);
+    auto stream = new ByteRangeCursor!I(input);
+    return ZipArchiveRead!Cursor(stream);
 }
 
 auto readZipArchive(File input)
 {
-    auto stream = new FileStream(input);
-    return ZipArchiveRead!SearchableStream(stream);
+    auto stream = new FileCursor(input);
+    return ZipArchiveRead!SearchableCursor(stream);
 }
 
 auto readZipArchive(ubyte[] zipData)
 {
-    auto stream = new ArrayStream(zipData);
-    return ZipArchiveRead!SearchableStream(stream);
+    auto stream = new ArrayCursor(zipData);
+    return ZipArchiveRead!SearchableCursor(stream);
 }
 
-private struct ZipArchiveRead(S) if (is(S : Stream))
+private struct ZipArchiveRead(C) if (is(C : Cursor))
 {
-    enum isSearchable = is(S : SearchableStream);
+    enum isSearchable = is(C : SearchableCursor);
 
-    private S input;
+    private C input;
     private ArchiveExtractEntry currentEntry;
     ubyte[] fieldBuf;
     size_t nextHeader;
@@ -452,7 +452,7 @@ private struct ZipArchiveRead(S) if (is(S : Stream))
         ZipEntryInfo[string] centralDirectory;
     }
 
-    this(S input)
+    this(C input)
     {
         this.input = input;
         fieldBuf = new ubyte[ushort.max];
@@ -735,7 +735,7 @@ private struct ZipArchiveRead(S) if (is(S : Stream))
 
         nextHeader = input.pos + info.compressedSize;
 
-        currentEntry = new ZipArchiveExtractEntry!S(input, info);
+        currentEntry = new ZipArchiveExtractEntry!C(input, info);
     }
 }
 
@@ -943,15 +943,15 @@ private struct ExtraFieldInfo
     }
 }
 
-private class ZipArchiveExtractEntry(S) : ArchiveExtractEntry if (is(S : Stream))
+private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor))
 {
-    enum isSearchable = is(S : SearchableStream);
+    enum isSearchable = is(C : SearchableCursor);
 
-    S input;
+    C input;
     size_t startPos;
     ZipEntryInfo info;
 
-    this(S input, ZipEntryInfo info)
+    this(C input, ZipEntryInfo info)
     {
         this.input = input;
         this.startPos = input.pos;
@@ -1020,9 +1020,9 @@ private class ZipArchiveExtractEntry(S) : ArchiveExtractEntry if (is(S : Stream)
             );
 
         if (info.deflated)
-            return new InflateByChunk!S(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new InflateByChunk!C(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
         else
-            return new StoredByChunk!S(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new StoredByChunk!C(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
     }
 }
 
@@ -1071,11 +1071,11 @@ private abstract class ZipByChunk : ByteRange
 }
 
 /// implements byChunk for stored entries (no compression)
-private class StoredByChunk(S) : ZipByChunk if (is(S : Stream))
+private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
 {
-    enum isSearchable = is(S : SearchableStream);
+    enum isSearchable = is(C : SearchableCursor);
 
-    S input;
+    C input;
     size_t currentPos;
     size_t size;
     ubyte[] outBuffer;
@@ -1084,7 +1084,7 @@ private class StoredByChunk(S) : ZipByChunk if (is(S : Stream))
     uint expectedCrc32;
     bool ended;
 
-    this(S input, size_t startPos, size_t size, size_t chunkSize, uint expectedCrc32)
+    this(C input, size_t startPos, size_t size, size_t chunkSize, uint expectedCrc32)
     {
         static if (!isSearchable)
             assert(input.pos == startPos);
@@ -1148,12 +1148,12 @@ private class StoredByChunk(S) : ZipByChunk if (is(S : Stream))
 }
 
 /// implements byChunk for deflated entries
-private class InflateByChunk(S) : ZipByChunk if (is(S : Stream))
+private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 {
-    enum isSearchable = is(S : SearchableStream);
+    enum isSearchable = is(C : SearchableCursor);
 
     z_stream stream;
-    S input;
+    C input;
     size_t currentPos;
     size_t compressedSz;
     ubyte[] outBuffer;
@@ -1164,7 +1164,7 @@ private class InflateByChunk(S) : ZipByChunk if (is(S : Stream))
     uint expectedCrc32;
     bool ended;
 
-    this(S input, size_t startPos, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
+    this(C input, size_t startPos, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
     {
         static if (!isSearchable)
             assert(input.pos == startPos);

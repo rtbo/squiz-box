@@ -141,20 +141,20 @@ static assert(isByteRange!(TarArchiveCreate!(ArchiveCreateEntry[])));
 /// Return a range of entries from a Tar formatted byte range
 auto readTarArchive(I)(I tarInput) if (isByteRange!I)
 {
-    auto dataInput = new ByteRangeStream!I(tarInput);
+    auto dataInput = new ByteRangeCursor!I(tarInput);
     return ArchiveTarRead(dataInput);
 }
 
 private struct ArchiveTarRead
 {
-    private Stream _input;
+    private Cursor _input;
 
     // current header data
     private size_t _next;
     private ubyte[] _block;
     private ArchiveExtractEntry _entry;
 
-    this(Stream input)
+    this(Cursor input)
     {
         _input = input;
         _block = new ubyte[512];
@@ -249,12 +249,12 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
 {
     import std.stdio : File;
 
-    private Stream _input;
+    private Cursor _input;
     private size_t _start;
     private size_t _end;
     private EntryData _data;
 
-    this(Stream input, EntryData data)
+    this(Cursor input, EntryData data)
     {
         _input = input;
         _start = input.pos;
@@ -323,7 +323,7 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
             _input.pos == _start,
             "Data cursor has moved, this entry is not valid anymore"
         );
-        return inputRangeObject(StreamByteRange(_input, chunkSize, _end));
+        return inputRangeObject(CursorByteRange(_input, chunkSize, _end));
     }
 }
 

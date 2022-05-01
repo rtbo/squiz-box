@@ -25,7 +25,7 @@ extern (C) void gcFree(void* opaque, void* addr)
 /// This is used either as adapter to File reading
 /// or as adapter to by-chunk data where arbitrary read length
 /// ease the implementation of an algorithm
-interface Stream
+interface Cursor
 {
     /// Position in the stream (how many bytes read so far)
     @property size_t pos();
@@ -55,14 +55,14 @@ interface Stream
 }
 
 /// Common interface between File and ubyte[].
-/// Similar to Stream, but allows to seek backwards.
+/// Similar to Cursor, but allows to seek to any position, including backwards.
 /// Implementers other than ubyte[] MUST have internal buffer.
-interface SearchableStream : Stream
+interface SearchableCursor : Cursor
 {
     /// Complete size of the data
     @property size_t size();
 
-    /// Seek to a position (relative to beginning)
+    /// Seek to a new position (relative to beginning)
     void seek(size_t pos);
 
     /// Read up to len bytes and return what was read.
@@ -72,7 +72,7 @@ interface SearchableStream : Stream
 
 
 /// Range based data input
-class ByteRangeStream(BR) : Stream if (isByteRange!BR)
+class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
     private size_t _pos;
@@ -147,7 +147,7 @@ class ByteRangeStream(BR) : Stream if (isByteRange!BR)
     }
 }
 
-class ArrayStream : SearchableStream
+class ArrayCursor : SearchableCursor
 {
     private ubyte[] _array;
     private size_t _pos;
@@ -205,7 +205,7 @@ class ArrayStream : SearchableStream
     }
 }
 
-class FileStream : SearchableStream
+class FileCursor : SearchableCursor
 {
     import std.stdio : File;
 
@@ -289,16 +289,16 @@ class FileStream : SearchableStream
     }
 }
 
-/// ByteRange that takes its data from Stream.
+/// ByteRange that takes its data from Cursor.
 /// Optionally stopping before data is exhausted.
-struct StreamByteRange
+struct CursorByteRange
 {
-    private Stream _input;
+    private Cursor _input;
     private size_t _end;
     private ubyte[] _buffer;
     private ubyte[] _chunk;
 
-    this(Stream input, size_t chunkSize = 4096, size_t end = size_t.max)
+    this(Cursor input, size_t chunkSize = 4096, size_t end = size_t.max)
     {
         _input = input;
         _end = end;
