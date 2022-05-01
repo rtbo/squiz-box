@@ -311,7 +311,7 @@ unittest
 @("Extract Zip Searchable stream")
 unittest
 {
-    import std.algorithm : each;
+    import std.array : array;
     import std.file : mkdir;
     import std.stdio : File;
 
@@ -320,9 +320,13 @@ unittest
 
     mkdir(dm.path);
 
-    File(archive, "rb")
+    auto entries = File(archive, "rb")
         .readZipArchive()
-        .each!(e => e.extractTo(dm.path));
+        .array;
+
+    entries[2].extractTo(dm.path);
+    entries[1].extractTo(dm.path);
+    entries[0].extractTo(dm.path);
 
     testExtractedFiles(dm, Yes.mode666);
 }

@@ -431,11 +431,11 @@ auto readZipArchive(ubyte[] zipData)
     return ZipArchiveRead!SearchableStream(stream);
 }
 
-private struct ZipArchiveRead(I) if (is(I : Stream))
+private struct ZipArchiveRead(S) if (is(S : Stream))
 {
-    enum isSearchable = is(I : SearchableStream);
+    enum isSearchable = is(S : SearchableStream);
 
-    private I input;
+    private S input;
     private ArchiveExtractEntry currentEntry;
     ubyte[] fieldBuf;
     size_t nextHeader;
@@ -452,7 +452,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
         ZipEntryInfo[string] centralDirectory;
     }
 
-    this(I input)
+    this(S input)
     {
         this.input = input;
         fieldBuf = new ubyte[ushort.max];
@@ -735,7 +735,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
 
         nextHeader = input.pos + info.compressedSize;
 
-        currentEntry = new ZipArchiveExtractEntry(input, info);
+        currentEntry = new ZipArchiveExtractEntry!S(input, info);
     }
 }
 
@@ -943,13 +943,15 @@ private struct ExtraFieldInfo
     }
 }
 
-private class ZipArchiveExtractEntry : ArchiveExtractEntry
+private class ZipArchiveExtractEntry(S) : ArchiveExtractEntry if (is(S : Stream))
 {
-    Stream input;
+    enum isSearchable = is(S : SearchableStream);
+
+    S input;
     size_t startPos;
     ZipEntryInfo info;
 
-    this(Stream input, ZipEntryInfo info)
+    this(S input, ZipEntryInfo info)
     {
         this.input = input;
         this.startPos = input.pos;
@@ -1011,15 +1013,16 @@ private class ZipArchiveExtractEntry : ArchiveExtractEntry
 
     ByteRange byChunk(size_t chunkSize)
     {
-        enforce(
-            input.pos == startPos,
-            "Data cursor has moved, this entry is not valid anymore"
-        );
+        static if (!isSearchable)
+            enforce(
+                input.pos == startPos,
+                "Data cursor has moved, this entry is not valid anymore"
+            );
 
         if (info.deflated)
-            return new InflateByChunk(input, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new InflateByChunk!S(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
         else
-            return new StoredByChunk(input, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new StoredByChunk!S(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
     }
 }
 
@@ -1068,9 +1071,11 @@ private abstract class ZipByChunk : ByteRange
 }
 
 /// implements byChunk for stored entries (no compression)
-private class StoredByChunk : ZipByChunk
+private class StoredByChunk(S) : ZipByChunk if (is(S : Stream))
 {
-    Stream input;
+    enum isSearchable = is(S : SearchableStream);
+
+    S input;
     size_t currentPos;
     size_t size;
     ubyte[] outBuffer;
@@ -1079,10 +1084,13 @@ private class StoredByChunk : ZipByChunk
     uint expectedCrc32;
     bool ended;
 
-    this(Stream input, size_t size, size_t chunkSize, uint expectedCrc32)
+    this(S input, size_t startPos, size_t size, size_t chunkSize, uint expectedCrc32)
     {
+        static if (!isSearchable)
+            assert(input.pos == startPos);
+
         this.input = input;
-        this.currentPos = input.pos;
+        this.currentPos = startPos;
         this.size = size;
         this.outBuffer = new ubyte[chunkSize];
         this.expectedCrc32 = expectedCrc32;
@@ -1113,9 +1121,13 @@ private class StoredByChunk : ZipByChunk
     {
         import std.algorithm : min;
 
-        enforce(input.pos == currentPos,
-            "Data cursor has moved. Entry is no longer valid."
-        );
+        static if (isSearchable)
+            input.seek(currentPos);
+        else
+            enforce(input.pos == currentPos,
+                "Data cursor has moved. Entry is no longer valid."
+            );
+
         const len = min(size, outBuffer.length);
         outChunk = input.read(outBuffer[0 .. len]);
         enforce(outChunk.length == len, "Corrupted Zip file: unexpected end of input");
@@ -1136,10 +1148,12 @@ private class StoredByChunk : ZipByChunk
 }
 
 /// implements byChunk for deflated entries
-private class InflateByChunk : ZipByChunk
+private class InflateByChunk(S) : ZipByChunk if (is(S : Stream))
 {
+    enum isSearchable = is(S : SearchableStream);
+
     z_stream stream;
-    Stream input;
+    S input;
     size_t currentPos;
     size_t compressedSz;
     ubyte[] outBuffer;
@@ -1150,10 +1164,13 @@ private class InflateByChunk : ZipByChunk
     uint expectedCrc32;
     bool ended;
 
-    this(Stream input, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
+    this(S input, size_t startPos, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
     {
+        static if (!isSearchable)
+            assert(input.pos == startPos);
+
         this.input = input;
-        this.currentPos = input.pos;
+        this.currentPos = startPos;
         this.compressedSz = compressedSz;
         this.outBuffer = new ubyte[chunkSize];
         this.inBuffer = new ubyte[defaultChunkSize];
@@ -1194,9 +1211,13 @@ private class InflateByChunk : ZipByChunk
         {
             if (inChunk.length == 0 && compressedSz != 0)
             {
-                enforce(input.pos == currentPos,
-                    "Data cursor has moved. Entry is no longer valid."
-                );
+                static if (isSearchable)
+                    input.seek(currentPos);
+                else
+                    enforce(input.pos == currentPos,
+                        "Data cursor has moved. Entry is no longer valid."
+                    );
+
                 const len = min(compressedSz, inBuffer.length);
                 inChunk = input.read(inBuffer[0 .. len]);
                 enforce(inChunk.length == len, "Corrupted Zip file: unexpected end of input");
