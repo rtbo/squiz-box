@@ -39,6 +39,8 @@ private struct ZipArchiveCreate(I)
     private ubyte[] endOfCentralDirectory;
     private bool endOfCentralDirReady;
 
+    enum madeBy = 45;
+
     this(I entries, size_t chunkSize)
     {
         this.entries = entries;
@@ -121,12 +123,16 @@ private struct ZipArchiveCreate(I)
         }
 
         ushort extractVersion = 20;
+        bool zip64;
 
         ExtraFieldInfo efInfo;
 
-        if (deflater.inflatedSize >= 0xffff_ffff || currentDeflated.length >= 0xffff_ffff)
+        if (deflater.inflatedSize >= 0xffff_ffff ||
+            currentDeflated.length >= 0xffff_ffff ||
+            localHeaderOffset >= 0xffff_ffff)
         {
-            extractVersion = 45;
+            zip64 = true;
+            extractVersion = madeBy;
             efInfo.addZip64(deflater.inflatedSize, currentDeflated.length, localHeaderOffset);
         }
         version (Posix)
@@ -152,20 +158,22 @@ private struct ZipArchiveCreate(I)
         local.compressionMethod = 8;
         local.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
         local.crc32 = cast(uint) deflater.crc32;
-        local.compressedSize = cast(uint) currentDeflated.length;
-        local.uncompressedSize = cast(uint) deflater.inflatedSize;
+        local.compressedSize = zip64 ? 0xffff_ffff : cast(uint) currentDeflated.length;
+        local.uncompressedSize = zip64 ? 0xffff_ffff : cast(uint) deflater.inflatedSize;
         // TODO: use store instead of deflate if smaller
         local.fileNameLength = cast(ushort) path.length;
         local.extraFieldLength = cast(ushort) localExtraFieldData.length;
         currentLocalHeader = local.writeTo(localHeaderBuffer, path, localExtraFieldData);
 
-        ushort versionMadeBy = 20;
-        uint externalAttributes = entry.attributes;
-
         version (Posix)
         {
-            versionMadeBy |= 0x0300;
-            externalAttributes = (externalAttributes & 0xffff) << 16;
+            const versionMadeBy = madeBy | 0x0300;
+            const externalAttributes = (entry.attributes & 0xffff) << 16;
+        }
+        else
+        {
+            const versionMadeBy = madeBy;
+            const externalAttributes = entry.attributes;
         }
 
         CentralFileHeader central = void;
@@ -176,15 +184,15 @@ private struct ZipArchiveCreate(I)
         central.compressionMethod = 8;
         central.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
         central.crc32 = cast(uint) deflater.crc32;
-        central.compressedSize = cast(uint) currentDeflated.length;
-        central.uncompressedSize = cast(uint) deflater.inflatedSize;
+        central.compressedSize = zip64 ? 0xffff_ffff : cast(uint) currentDeflated.length;
+        central.uncompressedSize = zip64 ? 0xffff_ffff : cast(uint) deflater.inflatedSize;
         central.fileNameLength = cast(ushort) path.length;
         central.extraFieldLength = cast(ushort) centralExtraFieldData.length;
         central.fileCommentLength = 0;
         central.diskNumberStart = 0;
         central.internalFileAttributes = 0;
         central.externalFileAttributes = externalAttributes;
-        central.relativeLocalHeaderOffset = cast(uint) localHeaderOffset;
+        central.relativeLocalHeaderOffset = zip64 ? 0xffff_ffff : cast(uint) localHeaderOffset;
         central.writeTo(
             centralHeaderBuffer[centralDirectory.length .. centralDirectory.length + centralHeaderLength],
             path, centralExtraFieldData, null
@@ -203,18 +211,43 @@ private struct ZipArchiveCreate(I)
 
     private void prepareEndOfCentralDir()
     {
-        EndOfCentralDirectory footer = void;
-        footer.signature = EndOfCentralDirectory.expectedSignature;
-        footer.thisDisk = 0;
-        footer.centralDirDisk = 0;
-        footer.centralDirEntriesOnThisDisk = cast(ushort) centralDirEntries;
-        footer.centralDirEntries = cast(ushort) centralDirEntries;
-        footer.centralDirSize = cast(uint) centralDirSize;
-        footer.centralDirOffset = cast(uint) centralDirOffset;
-        footer.fileCommentLength = 0;
+        const zip64 = centralDirEntries >= 0xffff || centralDirSize >= 0xffff_ffff || centralDirOffset >= 0xffff_ffff;
 
-        endOfCentralDirectory = new ubyte[EndOfCentralDirectory.computeTotalLength(null)];
-        endOfCentralDirectory = footer.writeTo(endOfCentralDirectory, null);
+        auto len = EndOfCentralDirectory.sizeof;
+        if (zip64)
+            len += Zip64EndOfCentralDirRecord.sizeof + Zip64EndOfCentralDirLocator.sizeof;
+
+        endOfCentralDirectory = new ubyte[len];
+        size_t offset;
+
+        if (zip64)
+        {
+            auto record = cast(Zip64EndOfCentralDirRecord*)&endOfCentralDirectory[offset];
+            record.signature = Zip64EndOfCentralDirRecord.expectedSignature;
+            record.zip64EndOfCentralDirRecordSize = Zip64EndOfCentralDirRecord.sizeof - 12;
+            version (Posix)
+                record.versionMadeBy = madeBy | 0x0300;
+            else
+                record.versionMadeBy = madeBy;
+            record.extractVersion = madeBy;
+            record.centralDirEntriesOnThisDisk = centralDirEntries;
+            record.centralDirEntries = centralDirEntries;
+            record.centralDirSize = centralDirSize;
+            record.centralDirOffset = centralDirOffset;
+            offset += Zip64EndOfCentralDirRecord.sizeof;
+
+            auto locator = cast(Zip64EndOfCentralDirLocator*)&endOfCentralDirectory[offset];
+            locator.signature = Zip64EndOfCentralDirLocator.expectedSignature;
+            locator.zip64EndOfCentralDirRecordOffset = centralDirOffset + centralDirSize;
+            offset += Zip64EndOfCentralDirLocator.sizeof;
+        }
+
+        auto footer = cast(EndOfCentralDirectory*)&endOfCentralDirectory[offset];
+        footer.signature = EndOfCentralDirectory.expectedSignature;
+        footer.centralDirEntriesOnThisDisk = zip64 ? 0xffff : cast(ushort) centralDirEntries;
+        footer.centralDirEntries = zip64 ? 0xffff : cast(ushort) centralDirEntries;
+        footer.centralDirSize = zip64 ? 0xffff_ffff : cast(uint) centralDirSize;
+        footer.centralDirOffset = zip64 ? 0xffff_ffff : cast(uint) centralDirOffset;
 
         endOfCentralDirReady = true;
     }
@@ -658,7 +691,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
         input.read(&header);
         if (header.signature == CentralFileHeader.expectedSignature)
         {
-            // we've gone through all entries, we have no interest in the central directory
+            // last entry was consumed
             input.ffw(size_t.max);
             return;
         }
@@ -856,7 +889,6 @@ private struct ExtraFieldInfo
 
         return info;
     }
-
 
     ubyte[] toZipData()
     {
