@@ -44,6 +44,11 @@ private struct LzmaCode
 
         return No.streamEnded;
     }
+
+    static void end(Stream* stream)
+    {
+        lzma_end(stream);
+    }
 }
 
 auto decompressXz(I)(I input, size_t chunkSize = defaultChunkSize)

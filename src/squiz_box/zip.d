@@ -296,8 +296,16 @@ private struct ZipArchiveCreate(I)
                 continue;
             }
 
+            if (deflater)
+            {
+                deflater.end();
+                deflater = null;
+            }
+
             if (!endOfCentralDirReady)
+            {
                 prepareEndOfCentralDir();
+            }
 
             if (endOfCentralDirectory.length)
             {
@@ -350,6 +358,11 @@ private class Deflater
             ret == Z_OK,
             "Could not initialize Zlib deflate stream: " ~ zResultToString(ret)
         );
+    }
+
+    void end()
+    {
+        deflateEnd(&stream);
     }
 
     void deflateEntry(ByteRange input)
@@ -1252,6 +1265,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
                     calculatedCrc32 == expectedCrc32,
                     "Corrupted Zip file: Wrong CRC32 checkum"
                 );
+                inflateEnd(&stream);
                 break;
             }
         }

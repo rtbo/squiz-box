@@ -429,6 +429,7 @@ struct CompressDecompressAlgo(I, P)
 
             if (streamEnded)
             {
+                P.end(stream);
                 ended = true;
                 break;
             }

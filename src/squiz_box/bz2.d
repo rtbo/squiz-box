@@ -90,7 +90,7 @@ private struct Bz2Compress
 {
     alias Stream = bz_stream;
 
-    static Flag!"streamEnded" process(bz_stream* stream, bool inputEmpty)
+    static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
     {
         const action = inputEmpty ? BZ_FINISH : BZ_RUN;
         const res = BZ2_bzCompress(stream, action);
@@ -105,6 +105,11 @@ private struct Bz2Compress
         );
 
         return No.streamEnded;
+    }
+
+    static void end(Stream* stream)
+    {
+        BZ2_bzCompressEnd(stream);
     }
 }
 
@@ -135,7 +140,7 @@ private struct Bz2Decompress
 {
     alias Stream = bz_stream;
 
-    static Flag!"streamEnded" process(bz_stream* stream, bool inputEmpty)
+    static Flag!"streamEnded" process(Stream* stream, bool inputEmpty)
     {
         const res = BZ2_bzDecompress(stream);
 
@@ -148,5 +153,10 @@ private struct Bz2Decompress
         );
 
         return No.streamEnded;
+    }
+
+    static void end(Stream* stream)
+    {
+        BZ2_bzDecompressEnd(stream);
     }
 }

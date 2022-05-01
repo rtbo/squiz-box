@@ -51,6 +51,11 @@ private struct ZlibDeflate
         );
         return No.streamEnded;
     }
+
+    static void end(Stream* stream)
+    {
+        deflateEnd(stream);
+    }
 }
 
 auto decompressGz(I)(I input, size_t chunkSize = defaultChunkSize)
@@ -91,6 +96,11 @@ private struct ZlibInflate
             "Zlib inflate failed with code: " ~ zResultToString(res)
         );
         return No.streamEnded;
+    }
+
+    static void end(Stream* stream)
+    {
+        inflateEnd(stream);
     }
 }
 
