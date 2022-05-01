@@ -67,7 +67,7 @@ interface SearchableCursor : Cursor
 
     /// Read up to len bytes and return what was read.
     /// Returns an array smaller than len only if EOI was reached, or if internal buffer is too small.
-    ubyte[] readLength(size_t len);
+    const(ubyte)[] readLength(size_t len);
 }
 
 
@@ -184,7 +184,7 @@ class ArrayCursor : SearchableCursor
         seek(pos + dist);
     }
 
-    ubyte[] readLength(size_t len)
+    const(ubyte)[] readLength(size_t len)
     {
         import std.algorithm : min;
 
@@ -262,7 +262,7 @@ class FileCursor : SearchableCursor
         seek(pos + dist);
     }
 
-    ubyte[] readLength(size_t len)
+    const(ubyte)[] readLength(size_t len)
     {
         import std.algorithm : min;
 
