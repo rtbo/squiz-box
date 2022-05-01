@@ -77,15 +77,22 @@ private struct ZipArchiveCreate(I)
 
         foreach (entry; entries)
         {
-            const path = entry.path;
-            size_t extraFieldLength = SquizBoxExtraField.sizeof;
-            version (Posix)
-            {
-                extraFieldLength += UnixExtraField.computeTotalLength(entry.linkname);
-            }
-            // Note: if the archive happens to need Zip64 extensions, more header allocations will be needed.
+            // Note: this do not check for Zip64 extra field.
+            // more header allocation will be needed if Zip64 extra field is needed.
 
-            maxHeaderSize = max(maxHeaderSize, LocalFileHeader.computeTotalLength(path, null) + extraFieldLength);
+            version (Posix)
+                size_t extraFieldLength = UnixExtraField.computeTotalLength(entry.linkname);
+            else
+                size_t extraFieldLength;
+
+            const path = entry.path;
+
+            maxHeaderSize = max(
+                maxHeaderSize,
+                LocalFileHeader.computeTotalLength(path, null) +
+                    extraFieldLength +
+                    SquizBoxExtraField.sizeof
+            );
             centralDirectorySize += CentralFileHeader.computeTotalLength(path, null, null) + extraFieldLength;
         }
 
@@ -113,52 +120,34 @@ private struct ZipArchiveCreate(I)
             path = replace(path, '\\', '/');
         }
 
-        ubyte[] extraField;
+        ushort extractVersion = 20;
 
+        ExtraFieldInfo efInfo;
+
+        if (deflater.inflatedSize >= 0xffff_ffff || currentDeflated.length >= 0xffff_ffff)
+        {
+            extractVersion = 45;
+            efInfo.addZip64(deflater.inflatedSize, currentDeflated.length, localHeaderOffset);
+        }
         version (Posix)
         {
-            import std.datetime.systime : Clock, stdTimeToUnixTime;
-
-            const linkname = entry.linkname;
-            const atime = stdTimeToUnixTime!int(Clock.currStdTime);
-            const mtime = stdTimeToUnixTime!int(entry.timeLastModified.stdTime);
-            const uid = entry.ownerId;
-            const gid = entry.groupId;
-
-            UnixExtraField unix = void;
-            unix.id = UnixExtraField.expectedId;
-            unix.size = cast(ushort)(linkname.length + 12);
-            unix.atime = atime;
-            unix.mtime = mtime;
-            unix.uid = cast(ushort) uid;
-            unix.gid = cast(ushort) gid;
-
-            extraField = new ubyte[unix.computeTotalLength(linkname) + SquizBoxExtraField.sizeof];
-            unix.writeTo(extraField[0 .. $ - SquizBoxExtraField.sizeof], linkname);
+            efInfo.addUnix(entry.linkname, entry.timeLastModified, entry.ownerId, entry.groupId);
         }
-        else
-        {
-            extraField = new ubyte[SquizBoxExtraField.sizeof];
-        }
-        SquizBoxExtraField sb;
-        sb.attributes = entry.attributes;
-        sb.writeTo(extraField[$ - SquizBoxExtraField.sizeof .. $]);
+        efInfo.addSquizBox(entry.attributes);
 
-        // TODO Zip64
+        const localExtraFieldData = efInfo.toZipData();
+        const localHeaderLength = LocalFileHeader.computeTotalLength(path, localExtraFieldData);
 
-        const localHeaderLength = LocalFileHeader.computeTotalLength(path, extraField);
-        const centralHeaderLength = CentralFileHeader.computeTotalLength(path, extraField, null);
+        const centralExtraFieldData = localExtraFieldData[0 .. $ - SquizBoxExtraField.sizeof];
+        const centralHeaderLength = CentralFileHeader.computeTotalLength(path, centralExtraFieldData, null);
 
-        static if (!isForwardRange!I)
-        {
-            if (localHeaderBuffer.length < localHeaderLength)
-                localHeaderBuffer.length = localHeaderLength;
-            centralHeaderBuffer.length += centralHeaderLength;
-        }
+        if (localHeaderBuffer.length < localHeaderLength)
+            localHeaderBuffer.length = localHeaderLength;
+        centralHeaderBuffer.length += centralHeaderLength;
 
         LocalFileHeader local = void;
         local.signature = LocalFileHeader.expectedSignature;
-        local.extractVersion = 20;
+        local.extractVersion = extractVersion;
         local.flag = 0;
         local.compressionMethod = 8;
         local.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
@@ -167,8 +156,8 @@ private struct ZipArchiveCreate(I)
         local.uncompressedSize = cast(uint) deflater.inflatedSize;
         // TODO: use store instead of deflate if smaller
         local.fileNameLength = cast(ushort) path.length;
-        local.extraFieldLength = cast(ushort) extraField.length;
-        currentLocalHeader = local.writeTo(localHeaderBuffer, path, extraField);
+        local.extraFieldLength = cast(ushort) localExtraFieldData.length;
+        currentLocalHeader = local.writeTo(localHeaderBuffer, path, localExtraFieldData);
 
         ushort versionMadeBy = 20;
         uint externalAttributes = entry.attributes;
@@ -182,7 +171,7 @@ private struct ZipArchiveCreate(I)
         CentralFileHeader central = void;
         central.signature = CentralFileHeader.expectedSignature;
         central.versionMadeBy = versionMadeBy;
-        central.extractVersion = 20;
+        central.extractVersion = extractVersion;
         central.flag = 0;
         central.compressionMethod = 8;
         central.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
@@ -190,7 +179,7 @@ private struct ZipArchiveCreate(I)
         central.compressedSize = cast(uint) currentDeflated.length;
         central.uncompressedSize = cast(uint) deflater.inflatedSize;
         central.fileNameLength = cast(ushort) path.length;
-        central.extraFieldLength = cast(ushort) extraField.length;
+        central.extraFieldLength = cast(ushort) centralExtraFieldData.length;
         central.fileCommentLength = 0;
         central.diskNumberStart = 0;
         central.internalFileAttributes = 0;
@@ -198,7 +187,7 @@ private struct ZipArchiveCreate(I)
         central.relativeLocalHeaderOffset = cast(uint) localHeaderOffset;
         central.writeTo(
             centralHeaderBuffer[centralDirectory.length .. centralDirectory.length + centralHeaderLength],
-            path, extraField, null
+            path, centralExtraFieldData, null
         );
 
         const entryLen = localHeaderLength + currentDeflated.length;
@@ -491,7 +480,8 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
                 info.path = cast(string)(input.readLength(header.fileNameLength.val).idup);
                 const extraFieldData = input.readLength(header.extraFieldLength.val);
 
-                const efInfo = parseExtraFields(extraFieldData);
+                const efInfo = ExtraFieldInfo.parse(extraFieldData);
+
                 if (header.fileCommentLength.val)
                     input.ffw(header.fileCommentLength.val);
 
@@ -504,7 +494,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
                     header.extraFieldLength.val +
                     header.fileCommentLength.val;
 
-                version(Posix)
+                version (Posix)
                 {
                     if ((header.versionMadeBy.val & 0xff00) == 0x3000)
                         info.attributes = header.externalFileAttributes.val >> 16;
@@ -599,60 +589,6 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
         }
     }
 
-    private ExtraFieldInfo parseExtraFields(const(ubyte)[] data)
-    {
-        ExtraFieldInfo info;
-
-        while (data.length != 0)
-        {
-            enforce(data.length >= 4, "Corrupted Zip File (incomplete extra-field)");
-
-            auto header = cast(const(ExtraFieldHeader)*) data.ptr;
-
-            const efLen = header.size.val + 4;
-            enforce(data.length >= efLen, "Corrupted Zip file (incomplete extra-field)");
-
-            switch (header.id.val)
-            {
-            case Zip64ExtraField.expectedId:
-                info.fields |= KnownExtraField.zip64;
-                auto ef = cast(Zip64ExtraField*) data.ptr;
-                info.uncompressedSize = ef.uncompressedSize.val;
-                info.compressedSize = ef.compressedSize.val;
-                info.headerPos = ef.headerPos.val;
-                break;
-            case SquizBoxExtraField.expectedId:
-                info.fields |= KnownExtraField.squizBox;
-                auto ef = cast(SquizBoxExtraField*) data.ptr;
-                info.attributes = ef.attributes.val;
-                break;
-                // dfmt off
-            version (Posix)
-            {
-                case UnixExtraField.expectedId:
-                    info.fields |= KnownExtraField.unix;
-                    auto ef = cast(UnixExtraField*) data.ptr;
-                    info.timeLastModified = SysTime(unixTimeToStdTime(ef.mtime.val));
-                    info.ownerId = ef.uid.val;
-                    info.groupId = ef.gid.val;
-                    if (efLen > UnixExtraField.sizeof)
-                    {
-                        info.linkname = cast(string)
-                            data[UnixExtraField.sizeof .. efLen].idup;
-                    }
-                    break;
-            }
-            // dfmt on
-            default:
-                break;
-            }
-
-            data = data[efLen .. $];
-        }
-
-        return info;
-    }
-
     private void fillEntryInfo(H)(ref ZipEntryInfo info, const ref ExtraFieldInfo efInfo, const ref H header)
             if (is(H == LocalFileHeader) || is(H == CentralFileHeader))
     {
@@ -739,7 +675,7 @@ private struct ZipArchiveRead(I) if (is(I : Stream))
         const extraFieldData = input.read(fieldBuf[0 .. header.extraFieldLength.val]);
         enforce(extraFieldData.length == header.extraFieldLength.val, "Unexpected end of input");
 
-        const efInfo = parseExtraFields(extraFieldData);
+        const efInfo = ExtraFieldInfo.parse(extraFieldData);
 
         static if (isSearchable)
         {
@@ -805,7 +741,7 @@ private struct ExtraFieldInfo
     // zip64
     ulong uncompressedSize;
     ulong compressedSize;
-    ulong headerPos;
+    ulong localHeaderPos;
 
     // unix
     version (Posix)
@@ -822,6 +758,156 @@ private struct ExtraFieldInfo
     bool has(KnownExtraField f) const
     {
         return (fields & f) != KnownExtraField.none;
+    }
+
+    void addZip64(ulong uncompressedSize, ulong compressedSize, ulong localHeaderPos)
+    {
+        fields |= KnownExtraField.zip64;
+        this.uncompressedSize = uncompressedSize;
+        this.compressedSize = compressedSize;
+        this.localHeaderPos = localHeaderPos;
+    }
+
+    version (Posix)
+    {
+        void addUnix(string linkname, SysTime timeLastModified, int ownerId, int groupId)
+        {
+            fields |= KnownExtraField.unix;
+            this.linkname = linkname;
+            this.timeLastModified = timeLastModified;
+            this.ownerId = ownerId;
+            this.groupId = groupId;
+        }
+    }
+
+    void addSquizBox(uint attributes)
+    {
+        fields |= KnownExtraField.squizBox;
+        this.attributes = attributes;
+    }
+
+    size_t computeLength()
+    {
+        size_t sz;
+
+        if (has(KnownExtraField.zip64))
+            sz += Zip64ExtraField.sizeof;
+        version (Posix)
+        {
+            if (has(KnownExtraField.unix))
+                sz += UnixExtraField.computeTotalLength(linkname);
+        }
+        if (has(KnownExtraField.squizBox))
+            sz += SquizBoxExtraField.sizeof;
+
+        return sz;
+    }
+
+    static ExtraFieldInfo parse(const(ubyte)[] data)
+    {
+        ExtraFieldInfo info;
+
+        while (data.length != 0)
+        {
+            enforce(data.length >= 4, "Corrupted Zip File (incomplete extra-field)");
+
+            auto header = cast(const(ExtraFieldHeader)*) data.ptr;
+
+            const efLen = header.size.val + 4;
+            enforce(data.length >= efLen, "Corrupted Zip file (incomplete extra-field)");
+
+            switch (header.id.val)
+            {
+            case Zip64ExtraField.expectedId:
+                info.fields |= KnownExtraField.zip64;
+                auto ef = cast(Zip64ExtraField*) data.ptr;
+                info.uncompressedSize = ef.uncompressedSize.val;
+                info.compressedSize = ef.compressedSize.val;
+                info.localHeaderPos = ef.localHeaderPos.val;
+                break;
+            case SquizBoxExtraField.expectedId:
+                info.fields |= KnownExtraField.squizBox;
+                auto ef = cast(SquizBoxExtraField*) data.ptr;
+                info.attributes = ef.attributes.val;
+                break;
+                // dfmt off
+            version (Posix)
+            {
+                case UnixExtraField.expectedId:
+                    info.fields |= KnownExtraField.unix;
+                    auto ef = cast(UnixExtraField*) data.ptr;
+                    info.timeLastModified = SysTime(unixTimeToStdTime(ef.mtime.val));
+                    info.ownerId = ef.uid.val;
+                    info.groupId = ef.gid.val;
+                    if (efLen > UnixExtraField.sizeof)
+                    {
+                        info.linkname = cast(string)
+                            data[UnixExtraField.sizeof .. efLen].idup;
+                    }
+                    break;
+            }
+            // dfmt on
+            default:
+                break;
+            }
+
+            data = data[efLen .. $];
+        }
+
+        return info;
+    }
+
+
+    ubyte[] toZipData()
+    {
+        const sz = computeLength();
+
+        auto data = new ubyte[sz];
+        size_t pos;
+
+        if (has(KnownExtraField.zip64))
+        {
+            auto f = cast(Zip64ExtraField*)&data[pos];
+            f.id = Zip64ExtraField.expectedId;
+            f.size = Zip64ExtraField.sizeof - 4;
+            f.uncompressedSize = uncompressedSize;
+            f.compressedSize = compressedSize;
+            f.localHeaderPos = localHeaderPos;
+            f.diskStartNumber = 0;
+            pos += Zip64ExtraField.sizeof;
+        }
+        version (Posix)
+        {
+            if (has(KnownExtraField.unix))
+            {
+                import std.datetime.systime : Clock, stdTimeToUnixTime;
+
+                auto f = cast(UnixExtraField*)&data[pos];
+                f.id = UnixExtraField.expectedId;
+                f.size = cast(ushort)(UnixExtraField.sizeof - 4 + linkname.length);
+                f.atime = stdTimeToUnixTime!int(Clock.currStdTime);
+                f.mtime = stdTimeToUnixTime!int(timeLastModified.stdTime);
+                f.uid = cast(ushort) ownerId;
+                f.gid = cast(ushort) groupId;
+                pos += UnixExtraField.sizeof;
+                if (linkname.length)
+                {
+                    data[pos .. pos + linkname.length] = cast(const(ubyte)[]) linkname;
+                    pos += linkname.length;
+                }
+            }
+        }
+        if (has(KnownExtraField.squizBox))
+        {
+            auto f = cast(SquizBoxExtraField*)&data[pos];
+            f.id = SquizBoxExtraField.expectedId;
+            f.size = SquizBoxExtraField.sizeof - 4;
+            f.attributes = attributes;
+            pos += SquizBoxExtraField.sizeof;
+        }
+
+        assert(pos == sz);
+        return data;
     }
 }
 
@@ -1324,7 +1410,7 @@ private struct Zip64ExtraField
     LittleEndian!2 size;
     LittleEndian!8 uncompressedSize;
     LittleEndian!8 compressedSize;
-    LittleEndian!8 headerPos;
+    LittleEndian!8 localHeaderPos;
     LittleEndian!4 diskStartNumber;
 }
 
