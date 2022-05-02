@@ -337,23 +337,6 @@ struct CursorByteRange
     }
 }
 
-struct EntryData
-{
-    string path;
-    string linkname;
-    EntryType type;
-    ulong size;
-    ulong entrySize;
-    SysTime timeLastModified;
-    uint attributes;
-
-    version (Posix)
-    {
-        int ownerId;
-        int groupId;
-    }
-}
-
 // Common algorithm for all compression/decompression functions.
 // I is a byte input range
 // P is a stream processor

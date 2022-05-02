@@ -219,31 +219,48 @@ private struct ArchiveTarRead
                 "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
         );
 
-        EntryData data;
-        data.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
-        data.type = toEntryType(th.typeflag);
-        data.linkname = parseString(th.linkname).idup;
-        data.size = parseOctalString!size_t(th.size);
-        data.entrySize = 512 + next512(data.size);
-        data.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
+        TarEntryInfo info;
+        info.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
+        info.type = toEntryType(th.typeflag);
+        info.linkname = parseString(th.linkname).idup;
+        info.size = parseOctalString!size_t(th.size);
+        info.entrySize = 512 + next512(info.size);
+        info.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
         version (Posix)
         {
             // tar mode contains stat.st_mode & 07777.
             // we have to add the missing flags corresponding to file type
             // (and by no way tar mode is meaningful on Windows)
             const filetype = posixModeFileType(th.typeflag);
-            data.attributes = parseOctalString(th.mode) | filetype;
-            data.ownerId = parseOctalString(th.uid);
-            data.groupId = parseOctalString(th.gid);
+            info.attributes = parseOctalString(th.mode) | filetype;
+            info.ownerId = parseOctalString(th.uid);
+            info.groupId = parseOctalString(th.gid);
         }
 
-        _entry = new ArchiveTarExtractEntry(_input, data);
+        _entry = new ArchiveTarExtractEntry(_input, info);
 
-        _next = next512(_input.pos + data.size);
+        _next = next512(_input.pos + info.size);
     }
 }
 
 static assert(isExtractEntryRange!ArchiveTarRead);
+
+struct TarEntryInfo
+{
+    string path;
+    string linkname;
+    EntryType type;
+    ulong size;
+    ulong entrySize;
+    SysTime timeLastModified;
+    uint attributes;
+
+    version (Posix)
+    {
+        int ownerId;
+        int groupId;
+    }
+}
 
 private class ArchiveTarExtractEntry : ArchiveExtractEntry
 {
@@ -252,14 +269,14 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
     private Cursor _input;
     private size_t _start;
     private size_t _end;
-    private EntryData _data;
+    private TarEntryInfo _info;
 
-    this(Cursor input, EntryData data)
+    this(Cursor input, TarEntryInfo info)
     {
         _input = input;
         _start = input.pos;
-        _end = _start + data.size;
-        _data = data;
+        _end = _start + info.size;
+        _info = info;
     }
 
     @property EntryMode mode()
@@ -269,49 +286,49 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
 
     @property string path()
     {
-        return _data.path;
+        return _info.path;
     }
 
     @property EntryType type()
     {
-        return _data.type;
+        return _info.type;
     }
 
     @property string linkname()
     {
-        return _data.linkname;
+        return _info.linkname;
     }
 
     @property size_t size()
     {
-        return _data.size;
+        return _info.size;
     }
 
     @property size_t entrySize()
     {
-        return _data.entrySize;
+        return _info.entrySize;
     }
 
     @property SysTime timeLastModified()
     {
-        return _data.timeLastModified;
+        return _info.timeLastModified;
     }
 
     @property uint attributes()
     {
-        return _data.attributes;
+        return _info.attributes;
     }
 
     version (Posix)
     {
         @property int ownerId()
         {
-            return _data.ownerId;
+            return _info.ownerId;
         }
 
         @property int groupId()
         {
-            return _data.groupId;
+            return _info.groupId;
         }
     }
 
