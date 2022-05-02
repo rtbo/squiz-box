@@ -28,14 +28,14 @@ extern (C) void gcFree(void* opaque, void* addr)
 interface Cursor
 {
     /// Position in the stream (how many bytes read so far)
-    @property size_t pos();
+    @property ulong pos();
 
     /// Whether end-of-input was reached
     @property bool eoi();
 
     /// Fast-forward and discard dist bytes.
     /// Passing size_t.max will exhaust the input.
-    void ffw(size_t dist);
+    void ffw(ulong dist);
 
     /// Read up to buffer.length bytes into buffer and return what was read.
     /// Returns a smaller slice only if EOI was reached.
@@ -60,10 +60,10 @@ interface Cursor
 interface SearchableCursor : Cursor
 {
     /// Complete size of the data
-    @property size_t size();
+    @property ulong size();
 
     /// Seek to a new position (relative to beginning)
-    void seek(size_t pos);
+    void seek(ulong pos);
 
     /// Read up to len bytes and return what was read.
     /// Returns an array smaller than len only if EOI was reached, or if internal buffer is too small.
@@ -75,7 +75,7 @@ interface SearchableCursor : Cursor
 class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
-    private size_t _pos;
+    private ulong _pos;
     private ubyte[] _chunk;
 
     this(BR input)
@@ -86,7 +86,7 @@ class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
             _chunk = _input.front;
     }
 
-    @property size_t pos()
+    @property ulong pos()
     {
         return _pos;
     }
@@ -96,13 +96,13 @@ class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
         return _chunk.length == 0;
     }
 
-    void ffw(size_t dist)
+    void ffw(ulong dist)
     {
         import std.algorithm : min;
 
         while (dist > 0 && _chunk.length)
         {
-            const len = min(_chunk.length, dist);
+            const len = cast(size_t)min(_chunk.length, dist);
             _chunk = _chunk[len .. $];
             _pos += len;
             dist -= len;
@@ -157,7 +157,7 @@ class ArrayCursor : SearchableCursor
         _array = array;
     }
 
-    @property size_t pos()
+    @property ulong pos()
     {
         return _pos;
     }
@@ -167,19 +167,19 @@ class ArrayCursor : SearchableCursor
         return _pos == _array.length;
     }
 
-    @property size_t size()
+    @property ulong size()
     {
         return _array.length;
     }
 
-    void seek(size_t pos)
+    void seek(ulong pos)
     {
         import std.algorithm : min;
 
-        _pos = min(pos, _array.length);
+        _pos = cast(size_t)min(pos, _array.length);
     }
 
-    void ffw(size_t dist)
+    void ffw(ulong dist)
     {
         seek(pos + dist);
     }
@@ -210,12 +210,12 @@ class FileCursor : SearchableCursor
     import std.stdio : File;
 
     File _file;
-    size_t _pos;
-    size_t _start;
-    size_t _end;
+    ulong _pos;
+    ulong _start;
+    ulong _end;
     ubyte[] _buffer;
 
-    this(File file, size_t bufferSize = defaultChunkSize, size_t start = 0, size_t end = size_t.max)
+    this(File file, size_t bufferSize = defaultChunkSize, ulong start = 0, ulong end = ulong.max)
     in (start <= end)
     {
         import std.algorithm : min;
@@ -237,7 +237,7 @@ class FileCursor : SearchableCursor
             _buffer = new ubyte[bufSize];
     }
 
-    @property size_t pos()
+    @property ulong pos()
     {
         return _pos;
     }
@@ -247,17 +247,17 @@ class FileCursor : SearchableCursor
         return _pos == _end;
     }
 
-    @property size_t size()
+    @property ulong size()
     {
         return _end - _start;
     }
 
-    void seek(size_t pos)
+    void seek(ulong pos)
     {
         _pos = pos;
     }
 
-    void ffw(size_t dist)
+    void ffw(ulong dist)
     {
         seek(pos + dist);
     }
@@ -280,7 +280,7 @@ class FileCursor : SearchableCursor
     {
         import std.algorithm : min;
 
-        const len = min(buffer.length, _end - _pos);
+        const len = cast(size_t)min(buffer.length, _end - _pos);
         _file.seek(_pos);
         auto result = _file.rawRead(buffer[0 .. len]);
         _pos += result.length;
@@ -294,11 +294,11 @@ class FileCursor : SearchableCursor
 struct CursorByteRange
 {
     private Cursor _input;
-    private size_t _end;
+    private ulong _end;
     private ubyte[] _buffer;
     private ubyte[] _chunk;
 
-    this(Cursor input, size_t chunkSize = 4096, size_t end = size_t.max)
+    this(Cursor input, size_t chunkSize = 4096, ulong end = ulong.max)
     {
         _input = input;
         _end = end;
@@ -311,7 +311,7 @@ struct CursorByteRange
     {
         import std.algorithm : min;
 
-        const len = min(_buffer.length, _end - _input.pos);
+        const len = cast(size_t)min(_buffer.length, _end - _input.pos);
         if (len == 0)
             _chunk = null;
         else
@@ -342,8 +342,8 @@ struct EntryData
     string path;
     string linkname;
     EntryType type;
-    size_t size;
-    size_t entrySize;
+    ulong size;
+    ulong entrySize;
     SysTime timeLastModified;
     uint attributes;
 

@@ -117,7 +117,7 @@ interface ArchiveEntry
 
     /// The size of the entry in bytes (returns zero for directories and symlink)
     /// This is the size of uncompressed, extracted data.
-    @property size_t size();
+    @property ulong size();
 
     /// The timeLastModified of the entry
     @property SysTime timeLastModified();
@@ -139,12 +139,12 @@ interface ArchiveEntry
     /// isBomb will return true if the path is an absolute path
     /// or a relative path going backwards (containing '..' after normalization).
     /// In addition, a criteria of maximum allowed size can be provided (by default all sizes are accepted).
-    final bool isBomb(size_t allowedSz = size_t.max)
+    final bool isBomb(ulong allowedSz = ulong.max)
     {
         import std.path : buildNormalizedPath, isAbsolute;
         import std.string : startsWith;
 
-        if (allowedSz != size_t.max && size > allowedSz)
+        if (allowedSz != ulong.max && size > allowedSz)
             return true;
 
         const p = path;
@@ -181,7 +181,7 @@ interface ArchiveCreateEntry : ArchiveEntry
 interface ArchiveExtractEntry : ArchiveEntry
 {
     /// The size occupied by the entry in the archive.
-    @property size_t entrySize();
+    @property ulong entrySize();
 
     /// A byte range to the content of the entry.
     /// Only relevant for regular files.
@@ -352,7 +352,7 @@ class FileArchiveEntry : ArchiveCreateEntry
         return null;
     }
 
-    @property size_t size()
+    @property ulong size()
     {
         import std.file : getSize;
 

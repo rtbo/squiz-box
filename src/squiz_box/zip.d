@@ -25,23 +25,23 @@ private struct ZipArchiveCreate(I)
 
     private ubyte[] localHeaderBuffer;
     private ubyte[] currentLocalHeader;
-    private size_t localHeaderOffset;
+    private ulong localHeaderOffset;
 
     private Deflater deflater;
     private ubyte[] currentDeflated;
 
     private ubyte[] centralHeaderBuffer;
     private ubyte[] centralDirectory;
-    private size_t centralDirEntries;
-    private size_t centralDirOffset;
-    private size_t centralDirSize;
+    private ulong centralDirEntries;
+    private ulong centralDirOffset;
+    private ulong centralDirSize;
 
     private ubyte[] endOfCentralDirectory;
     private bool endOfCentralDirReady;
 
     enum madeBy = 45;
 
-    this(I entries, size_t chunkSize)
+    this(I entries, ulong chunkSize)
     {
         this.entries = entries;
         outBuffer = new ubyte[chunkSize];
@@ -299,7 +299,6 @@ private struct ZipArchiveCreate(I)
             if (deflater)
             {
                 deflater.end();
-                deflater = null;
             }
 
             if (!endOfCentralDirReady)
@@ -333,7 +332,7 @@ private class Deflater
     // slice of buffer that contains compressed data of the last entry.
     ubyte[] deflated;
     // unompressed size of the last entry
-    size_t inflatedSize;
+    ulong inflatedSize;
     // CRC32 checksum of the last entry
     ulong crc32;
 
@@ -451,7 +450,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
     private C input;
     private ArchiveExtractEntry currentEntry;
     ubyte[] fieldBuf;
-    size_t nextHeader;
+    ulong nextHeader;
 
     static if (isSearchable)
     {
@@ -570,9 +569,9 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
             enforce(
                 input.size > EndOfCentralDirectory.sizeof, "Not a Zip file"
             );
-            size_t pos = input.size - EndOfCentralDirectory.sizeof;
+            ulong pos = input.size - EndOfCentralDirectory.sizeof;
             enum maxCommentSz = 0xffff;
-            const size_t stopSearch = max(pos, maxCommentSz) - maxCommentSz;
+            const ulong stopSearch = max(pos, maxCommentSz) - maxCommentSz;
             while (pos != stopSearch)
             {
                 input.seek(pos);
@@ -705,7 +704,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
         if (header.signature == CentralFileHeader.expectedSignature)
         {
             // last entry was consumed
-            input.ffw(size_t.max);
+            input.ffw(ulong.max);
             return;
         }
 
@@ -757,9 +756,9 @@ private struct ZipEntryInfo
     string path;
     string linkname;
     EntryType type;
-    size_t size;
-    size_t entrySize;
-    size_t compressedSize;
+    ulong size;
+    ulong entrySize;
+    ulong compressedSize;
     SysTime timeLastModified;
     uint attributes;
     bool deflated;
@@ -961,7 +960,7 @@ private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor)
     enum isSearchable = is(C : SearchableCursor);
 
     C input;
-    size_t startPos;
+    ulong startPos;
     ZipEntryInfo info;
 
     this(C input, ZipEntryInfo info)
@@ -991,12 +990,12 @@ private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor)
         return info.linkname;
     }
 
-    @property size_t size()
+    @property ulong size()
     {
         return info.size;
     }
 
-    @property size_t entrySize()
+    @property ulong entrySize()
     {
         return info.entrySize;
     }
@@ -1089,15 +1088,15 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
     enum isSearchable = is(C : SearchableCursor);
 
     C input;
-    size_t currentPos;
-    size_t size;
+    ulong currentPos;
+    ulong size;
     ubyte[] outBuffer;
     ubyte[] outChunk;
     ulong calculatedCrc32;
     uint expectedCrc32;
     bool ended;
 
-    this(C input, size_t startPos, size_t size, size_t chunkSize, uint expectedCrc32)
+    this(C input, ulong startPos, ulong size, size_t chunkSize, uint expectedCrc32)
     {
         static if (!isSearchable)
             assert(input.pos == startPos);
@@ -1167,8 +1166,8 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 
     z_stream stream;
     C input;
-    size_t currentPos;
-    size_t compressedSz;
+    ulong currentPos;
+    ulong compressedSz;
     ubyte[] outBuffer;
     ubyte[] outChunk;
     ubyte[] inBuffer;
@@ -1177,7 +1176,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
     uint expectedCrc32;
     bool ended;
 
-    this(C input, size_t startPos, size_t compressedSz, size_t chunkSize, uint expectedCrc32)
+    this(C input, ulong startPos, ulong compressedSz, size_t chunkSize, uint expectedCrc32)
     {
         static if (!isSearchable)
             assert(input.pos == startPos);
