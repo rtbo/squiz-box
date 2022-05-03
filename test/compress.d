@@ -7,6 +7,7 @@ import squiz_box.core;
 import squiz_box.gz;
 import squiz_box.xz;
 
+import std.typecons;
 
 @("Compress GZ tar")
 unittest
@@ -28,7 +29,7 @@ unittest
     tarF.close();
     tarXzF.close();
 
-    testTarArchiveContent(archive.path);
+    testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
 
 @("Compress GZ sequential")
@@ -102,7 +103,10 @@ unittest
 
     tarF.close();
 
-    testTarArchiveContent(archive.path);
+    /// windows do not have bzip2
+    /// deactivating for now
+    version(Posix)
+        testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
 
 @("Compress Bz2 sequential")
@@ -183,7 +187,10 @@ unittest
     tarF.close();
     tarXzF.close();
 
-    testTarArchiveContent(archive.path);
+    /// windows do not have xz
+    /// deactivating for now
+    version(Posix)
+        testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
 
 @("Compress XZ sequential")
@@ -257,18 +264,19 @@ private void testCompressData(alias fun)(size_t len, string filename, string alg
     sw.stop();
     const time = sw.peek;
 
-    const sum = toHexString!(LetterCase.lower)(sha1)[].idup;
+    // windows do not have bzip2 and xz
+    // deactivating for now
+    version(Windows)
+        const test = utility != "bzip2" && utility != "xz";
+    else
+        const test = true;
 
-    const fileShell = escapeShellFileName(filename);
-    const res = executeShell(utility ~ " -d --stdout " ~ fileShell ~ " | sha1sum");
-
-    assert(res.status == 0);
-    assert(
-        res.output.canFind(sum),
-        "checksum failed for " ~ algo ~ " " ~ datatype ~ "\n" ~
-        "before algo: " ~ sum ~ "\n" ~
-        "after algo: " ~ res.output
-    );
+    if (test)
+    {
+        const expectedSum = toHexString(sha1)[].idup;
+        const sum = sha1sumProcessStdout([utility, "-d", "--stdout", filename]);
+        assert(sum == expectedSum);
+    }
 
     const compressedSz = getSize(filename);
     double ratio = compressedSz / cast(double)len;

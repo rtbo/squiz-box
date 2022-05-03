@@ -10,6 +10,8 @@ import squiz_box.zip;
 import test.util;
 
 import std.typecons;
+import std.digest;
+import std.digest.sha;
 
 string[] filesForArchive()
 {
@@ -20,52 +22,50 @@ string[] filesForArchive()
     ];
 }
 
-void testTarArchiveContent(string archivePath)
+void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!"mode666" mode666)
 {
     import std.algorithm : canFind;
-    import std.process : execute, executeShell, escapeShellFileName;
+    import std.path : buildNormalizedPath;
+    import std.process : execute;
     import std.regex : matchFirst;
     import std.string : splitLines;
 
-    const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
-    const line2 = `^-rw-r--r-- .+ 3521 .+ file 2.txt$`;
-    version(Posix)
+    if (testModes)
     {
-        const line3 = `^-rw-rw-rw- .+ 26 .+ folder/chmod 666.txt$`;
-    }
-    else
-    {
-        const line3 = `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
-    }
+        const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
+        const line2 = `^-rw-r--r-- .+ 3521 .+ file 2.txt$`;
+        const line3 = mode666 ?
+            `^-rw-rw-rw- .+ 26 .+ folder.+chmod 666.txt$` :
+            `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
 
-    auto res = execute(["tar", "-tvf", archivePath]);
-    assert(res.status == 0);
-    const lines = res.output.splitLines();
-    assert(lines.length == 3);
-    debug { import std.stdio : writeln; try { writeln(res.output); } catch (Exception) {} }
-    assert(matchFirst(lines[0], line1));
-    assert(matchFirst(lines[1], line2));
-    assert(matchFirst(lines[2], line3));
-
-    const archiveShell = escapeShellFileName(archivePath);
+        auto res = execute(["tar", "-tvf", archivePath]);
+        assert(res.status == 0);
+        const lines = res.output.splitLines();
+        assert(lines.length == 3);
+        assert(matchFirst(lines[0], line1));
+        assert(matchFirst(lines[1], line2));
+        assert(matchFirst(lines[2], line3));
+    }
 
     auto sha1sumFile(string filename)
     {
-        const fileShell = escapeShellFileName(filename);
-        return executeShell("tar -xOf " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+        return sha1sumProcessStdout(["tar", "-xOf", archivePath, filename]);
     }
 
-    res = sha1sumFile("file1.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
+    auto sha1 = sha1sumFile("file1.txt");
+    assert(sha1 == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
 
-    res = sha1sumFile("file 2.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
+    sha1 = sha1sumFile("file 2.txt");
+    assert(sha1 == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
 
-    res = sha1sumFile("folder/chmod 666.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+    try {
+        sha1 = sha1sumFile("folder/chmod 666.txt");
+    }
+    catch(Exception)
+    {
+        sha1 = sha1sumFile("folder\\\\chmod 666.txt"); // windows tar is a weirdo
+    }
+    assert(sha1 == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
 }
 
 void testZipArchiveContent(string archivePath)
@@ -111,8 +111,6 @@ void testZipArchiveContent(string archivePath)
 void testExtractedFiles(DM)(auto ref DM dm, Flag!"mode666" mode666)
 {
     import std.conv : octal;
-    import std.digest : hexDigest;
-    import std.digest.sha : SHA1;
     import std.file : read, getLinkAttributes;
 
     version (Posix)
@@ -144,7 +142,12 @@ unittest
         .createTarArchive()
         .writeBinaryFile(archive.path);
 
-    testTarArchiveContent(archive.path);
+    version(Windows)
+        enum m666 = No.mode666;
+    else
+        enum m666 = Yes.mode666;
+
+    testTarArchiveContent(archive.path, Yes.testModes, m666);
 
     enum expectedLen = 2 * 512 + 512 + 3584 + 2 * 512 + 2 * 512;
     auto content = cast(const(ubyte)[]) read(archive.path);
@@ -158,8 +161,6 @@ unittest
     import std.algorithm : equal, map;
     import std.array : array;
     import std.conv : octal;
-    import std.digest.sha : SHA1;
-    import std.digest : hexDigest;
     import std.stdio : File;
 
     const path = testPath("data/archive.tar");
@@ -295,7 +296,10 @@ unittest
         .createZipArchive()
         .writeBinaryFile(archive.path);
 
-    testZipArchiveContent(archive.path);
+    version(Windows)
+        testTarArchiveContent(archive.path, No.testModes, No.mode666);
+    else
+        testZipArchiveContent(archive.path);
 }
 
 @("Extract Zip")

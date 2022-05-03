@@ -2,6 +2,8 @@ module test.util;
 
 import squiz_box.core;
 
+import std.digest;
+import std.digest.sha;
 import std.file;
 import std.path;
 import std.string;
@@ -96,6 +98,30 @@ struct Path
 
     string path;
 }
+
+/// start a process and return sha1sum of stdout
+string sha1sumProcessStdout(string[] args)
+{
+    import std.algorithm :each;
+    import std.exception : enforce;
+    import std.process : pipeProcess, Redirect, wait;
+
+    auto pipes = pipeProcess(args, Redirect.stdout);
+    scope(exit)
+    {
+        enforce(wait(pipes.pid) == 0);
+    }
+
+    auto sha1 = makeDigest!SHA1();
+    pipes
+        .stdout
+        .byChunk(4096)
+        .each!(chunk => sha1.put(chunk));
+
+    const hash = sha1.finish();
+    return toHexString(hash[]);
+}
+
 
 /// Return a byte range that generates potentially very large amount of binary data.
 /// The data contains _num_ bytes in the form of 64 bits integers,
