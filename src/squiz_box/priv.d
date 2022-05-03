@@ -5,6 +5,7 @@ package(squiz_box):
 import squiz_box.core : defaultChunkSize, EntryType, isByteRange;
 
 import std.datetime.systime;
+import std.exception;
 import std.traits : isDynamicArray, isIntegral;
 
 extern (C) void* gcAlloc(T)(void* opaque, T n, T m) if (isIntegral!T)
@@ -224,6 +225,7 @@ class ArrayCursor : SearchableCursor
 
     ubyte get()
     {
+        enforce(_pos < _array.length, "No more bytes");
         return _array[_pos++];
     }
 
@@ -312,9 +314,9 @@ class FileCursor : SearchableCursor
         // for efficiency we use getc
         import core.stdc.stdio : getc;
 
-        const res = cast(ubyte)getc(_file.getFP());
         _pos++;
-        return res;
+        enforce(_pos <= _end, "No more bytes");
+        return cast(ubyte)getc(_file.getFP());
     }
 
     ubyte[] read(ubyte[] buffer)
