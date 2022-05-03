@@ -37,25 +37,51 @@ interface Cursor
     /// Passing size_t.max will exhaust the input.
     void ffw(ulong dist);
 
+    /// Reads a single byte
+    ubyte get()
+    in (!eoi);
+
+    /// Similar to read!T, but returns the value.
+    /// This form may be preferred for smaller values (e.g. a few bytes)
+    T get(T)()
+    {
+        T val = void;
+        read(&val);
+        return val;
+    }
+
     /// Read up to buffer.length bytes into buffer and return what was read.
     /// Returns a smaller slice only if EOI was reached.
     ubyte[] read(ubyte[] buffer);
 
     /// Read T.sizeof data and returns it as a T.
-    void read(T)(T* val)
-    if (!isDynamicArray!T)
+    /// Similar to get!T but the value is passed as pointer to be filled in.
+    /// Prefer this form for greater values (e.g. dozens of bytes)
+    void read(T)(T* val) if (!isDynamicArray!T)
     {
         import std.exception : enforce;
 
-        auto ptr = cast(ubyte*)val;
+        auto ptr = cast(ubyte*) val;
         auto buf = ptr[0 .. T.sizeof];
         auto res = read(buf);
         enforce(res.length == T.sizeof, "Could not read enough bytes for " ~ T.stringof);
     }
+
+    T[] read(T)(T[] buffer)
+    {
+        auto ptr = cast(ubyte)&buffer[0];
+        auto arr = ptr[0 .. buffer.length * T.sizeof];
+        auto res = read(arr);
+        enforce(res.length % T.sizeof == 0, "Could not read aligned bytes for " ~ T.stringof);
+        if (!res.length)
+            return [];
+        auto resptr = cast(T*)&res[0];
+        return resptr[0 .. res.length / T.sizeof];
+    }
 }
 
-/// Common interface between File and ubyte[].
-/// Similar to Cursor, but allows to seek to any position, including backwards.
+/// A Cursor whose size is known and that can seek to arbitrary positions,
+/// including backwards.
 /// Implementers other than ubyte[] MUST have internal buffer.
 interface SearchableCursor : Cursor
 {
@@ -69,7 +95,6 @@ interface SearchableCursor : Cursor
     /// Returns an array smaller than len only if EOI was reached, or if internal buffer is too small.
     const(ubyte)[] readLength(size_t len);
 }
-
 
 /// Range based data input
 class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
@@ -102,7 +127,7 @@ class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 
         while (dist > 0 && _chunk.length)
         {
-            const len = cast(size_t)min(_chunk.length, dist);
+            const len = cast(size_t) min(_chunk.length, dist);
             _chunk = _chunk[len .. $];
             _pos += len;
             dist -= len;
@@ -116,6 +141,19 @@ class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
                     break;
             }
         }
+    }
+
+    ubyte get()
+    {
+        const res = _chunk[0];
+        _chunk = _chunk[1 .. $];
+        if (_chunk.length == 0)
+        {
+            _input.popFront();
+            if (!_input.empty)
+                _chunk = _input.front;
+        }
+        return res;
     }
 
     ubyte[] read(ubyte[] buffer)
@@ -176,7 +214,7 @@ class ArrayCursor : SearchableCursor
     {
         import std.algorithm : min;
 
-        _pos = cast(size_t)min(pos, _array.length);
+        _pos = cast(size_t) min(pos, _array.length);
     }
 
     void ffw(ulong dist)
@@ -184,14 +222,9 @@ class ArrayCursor : SearchableCursor
         seek(pos + dist);
     }
 
-    const(ubyte)[] readLength(size_t len)
+    ubyte get()
     {
-        import std.algorithm : min;
-
-        const l = min(len, _array.length - _pos);
-        const p = _pos;
-        _pos += l;
-        return _array[p .. p + l];
+        return _array[_pos++];
     }
 
     ubyte[] read(ubyte[] buffer)
@@ -203,8 +236,19 @@ class ArrayCursor : SearchableCursor
         _pos += l;
         return buffer[0 .. l];
     }
+
+    const(ubyte)[] readLength(size_t len)
+    {
+        import std.algorithm : min;
+
+        const l = min(len, _array.length - _pos);
+        const p = _pos;
+        _pos += l;
+        return _array[p .. p + l];
+    }
 }
 
+/// The cursor MUST have exclusive access on the file
 class FileCursor : SearchableCursor
 {
     import std.stdio : File;
@@ -255,11 +299,33 @@ class FileCursor : SearchableCursor
     void seek(ulong pos)
     {
         _pos = pos;
+        _file.seek(pos);
     }
 
     void ffw(ulong dist)
     {
         seek(pos + dist);
+    }
+
+    ubyte get()
+    {
+        // for efficiency we use getc
+        import core.stdc.stdio : getc;
+
+        const res = cast(ubyte)getc(_file.getFP());
+        _pos++;
+        return res;
+    }
+
+    ubyte[] read(ubyte[] buffer)
+    {
+        import std.algorithm : min;
+
+        const len = cast(size_t) min(buffer.length, _end - _pos);
+        auto result = _file.rawRead(buffer[0 .. len]);
+        _pos += result.length;
+        assert(_pos <= _end);
+        return result;
     }
 
     const(ubyte)[] readLength(size_t len)
@@ -269,23 +335,10 @@ class FileCursor : SearchableCursor
         assert(_buffer.length > 0, "FileDataAdapter constructed without buffer. Use read(buffer)");
 
         const l = min(len, _end - _pos, _buffer.length);
-        _file.seek(_pos);
         auto res = _file.rawRead(_buffer[0 .. l]);
         _pos += res.length;
         assert(_pos <= _end);
         return res;
-    }
-
-    ubyte[] read(ubyte[] buffer)
-    {
-        import std.algorithm : min;
-
-        const len = cast(size_t)min(buffer.length, _end - _pos);
-        _file.seek(_pos);
-        auto result = _file.rawRead(buffer[0 .. len]);
-        _pos += result.length;
-        assert(_pos <= _end);
-        return result;
     }
 }
 
@@ -311,7 +364,7 @@ struct CursorByteRange
     {
         import std.algorithm : min;
 
-        const len = cast(size_t)min(_buffer.length, _end - _input.pos);
+        const len = cast(size_t) min(_buffer.length, _end - _input.pos);
         if (len == 0)
             _chunk = null;
         else
