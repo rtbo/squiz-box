@@ -1,9 +1,10 @@
 module squiz_box.zip;
 
-import squiz_box.c.zlib;
 import squiz_box.core;
 import squiz_box.gz;
 import squiz_box.priv;
+
+import etc.c.zlib;
 
 import std.exception;
 import std.traits : isIntegral;
@@ -157,7 +158,7 @@ private struct ZipArchiveCreate(I)
         local.flag = 0;
         local.compressionMethod = 8;
         local.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
-        local.crc32 = cast(uint) deflater.crc32;
+        local.crc32 = deflater.calculatedCrc32;
         local.compressedSize = zip64 ? 0xffff_ffff : cast(uint) currentDeflated.length;
         local.uncompressedSize = zip64 ? 0xffff_ffff : cast(uint) deflater.inflatedSize;
         // TODO: use store instead of deflate if smaller
@@ -183,7 +184,7 @@ private struct ZipArchiveCreate(I)
         central.flag = 0;
         central.compressionMethod = 8;
         central.lastModDosTime = SysTimeToDosFileTime(entry.timeLastModified);
-        central.crc32 = cast(uint) deflater.crc32;
+        central.crc32 = deflater.calculatedCrc32;
         central.compressedSize = zip64 ? 0xffff_ffff : cast(uint) currentDeflated.length;
         central.uncompressedSize = zip64 ? 0xffff_ffff : cast(uint) deflater.inflatedSize;
         central.fileNameLength = cast(ushort) path.length;
@@ -334,12 +335,12 @@ private class Deflater
     // unompressed size of the last entry
     ulong inflatedSize;
     // CRC32 checksum of the last entry
-    ulong crc32;
+    uint calculatedCrc32;
 
     this()
     {
-        stream.zalloc = &(gcAlloc!uint);
-        stream.zfree = &gcFree;
+        // stream.zalloc = &(gcAlloc!uint);
+        // stream.zfree = &gcFree;
 
         const level = 6;
         const windowBits = 15;
@@ -379,7 +380,7 @@ private class Deflater
             deflateBuffer = new ubyte[64 * 1024];
         }
 
-        crc32 = squiz_box.c.zlib.crc32(0, null, 0);
+        calculatedCrc32 = crc32(0, null, 0);
 
         ubyte[] inChunk;
 
@@ -389,7 +390,7 @@ private class Deflater
             {
                 inChunk = input.front;
                 inflatedSize += inChunk.length;
-                crc32 = squiz_box.c.zlib.crc32(crc32, inChunk.ptr, cast(uint)(inChunk.length));
+                calculatedCrc32 = crc32(calculatedCrc32, inChunk.ptr, cast(uint)(inChunk.length));
             }
 
             if (deflated.length == deflateBuffer.length)
@@ -1092,7 +1093,7 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
     ulong size;
     ubyte[] outBuffer;
     ubyte[] outChunk;
-    ulong calculatedCrc32;
+    uint calculatedCrc32;
     uint expectedCrc32;
     bool ended;
 
@@ -1172,7 +1173,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
     ubyte[] outChunk;
     ubyte[] inBuffer;
     ubyte[] inChunk;
-    ulong calculatedCrc32;
+    uint calculatedCrc32;
     uint expectedCrc32;
     bool ended;
 

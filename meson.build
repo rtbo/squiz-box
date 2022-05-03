@@ -31,7 +31,7 @@ squiz_lib = library('squiz-box', squiz_src,
     d_module_versions: squiz_ver,
 )
 
-squiz_deps = [zlib_dep, bz2_dep, xz_dep]
+squiz_deps = [bz2_dep, xz_dep]
 
 squiz_dep = declare_dependency(
     link_with: squiz_lib,

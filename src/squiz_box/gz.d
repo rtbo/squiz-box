@@ -1,8 +1,9 @@
 module squiz_box.gz;
 
-import squiz_box.c.zlib;
 import squiz_box.core;
 import squiz_box.priv;
+
+import etc.c.zlib;
 
 import std.exception;
 import std.typecons;
@@ -15,8 +16,8 @@ auto compressGz(I)(I input, uint level = 6, size_t chunkSize = defaultChunkSize)
     const strategy = Z_DEFAULT_STRATEGY;
 
     auto stream = new z_stream;
-    stream.zalloc = &(gcAlloc!uint);
-    stream.zfree = &gcFree;
+    // stream.zalloc = &(gcAlloc!uint);
+    // stream.zfree = &gcFree;
 
     const ret = deflateInit2(
         stream, level, Z_DEFLATED,
@@ -64,8 +65,8 @@ auto decompressGz(I)(I input, size_t chunkSize = defaultChunkSize)
     const windowBits = 15;
 
     auto stream = new z_stream;
-    stream.zalloc = &(gcAlloc!uint);
-    stream.zfree = &gcFree;
+    // stream.zalloc = &(gcAlloc!uint);
+    // stream.zfree = &gcFree;
 
     const ret = inflateInit2(
         stream, 16 + windowBits /* +16 for gzip instead of zlib wrapper */ ,
