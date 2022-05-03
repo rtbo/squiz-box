@@ -40,7 +40,7 @@ unittest
 
     auto dataGz = DeleteMe("data", ".gz");
 
-    const len = 1000 * 1000;
+    const len = 10_000;
 
     testCompressData!({
         SHA1 sha;
@@ -67,7 +67,7 @@ unittest
     auto dataGz = DeleteMe("data", ".gz");
 
     const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 100*1000*1000;
+    const len = 1000*1000;
 
     testCompressData!({
         SHA1 sha;
@@ -103,8 +103,8 @@ unittest
 
     tarF.close();
 
-    /// windows do not have bzip2
-    /// deactivating for now
+    // windows do not have bzip2
+    // deactivating for now
     version(Posix)
         testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
@@ -117,7 +117,7 @@ unittest
 
     auto dm = DeleteMe("data", ".bz2");
 
-    const len = 1000 * 1000;
+    const len = 10_000;
 
     testCompressData!({
         SHA1 sha;
@@ -145,7 +145,7 @@ unittest
     auto dm = DeleteMe("data", ".bz2");
 
     const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 5*1000*1000;
+    const len = 1000*1000;
 
     generateRepetitiveData(len, phrase, 8192)
         .writeBinaryFile("data");
@@ -187,8 +187,8 @@ unittest
     tarF.close();
     tarXzF.close();
 
-    /// windows do not have xz
-    /// deactivating for now
+    // windows do not have xz
+    // deactivating for now
     version(Posix)
         testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
@@ -201,7 +201,7 @@ unittest
 
     auto dataXz = DeleteMe("data", ".xz");
 
-    const len = 1000 * 1000;
+    const len = 10_000;
 
     testCompressData!({
         SHA1 sha;
@@ -228,7 +228,7 @@ unittest
     auto dataXz = DeleteMe("data", ".xz");
 
     const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 100*1000*1000;
+    const len = 1000*1000;
 
     testCompressData!({
         SHA1 sha;
@@ -249,20 +249,20 @@ unittest
 private void testCompressData(alias fun)(size_t len, string filename, string algo, string datatype, string utility)
 {
     import std.algorithm : canFind;
-    import std.datetime.stopwatch;
+    // import std.datetime.stopwatch;
     import std.digest : toHexString, LetterCase;
     import std.file : getSize;
     import std.process : executeShell, escapeShellFileName;
     import std.stdio : File, writefln;
 
 
-    StopWatch sw;
-    sw.start();
+    // StopWatch sw;
+    // sw.start();
 
     const sha1 = fun();
 
-    sw.stop();
-    const time = sw.peek;
+    // sw.stop();
+    // const time = sw.peek;
 
     // windows do not have bzip2 and xz
     // deactivating for now
@@ -278,9 +278,9 @@ private void testCompressData(alias fun)(size_t len, string filename, string alg
         assert(sum == expectedSum);
     }
 
-    const compressedSz = getSize(filename);
-    double ratio = compressedSz / cast(double)len;
+    // const compressedSz = getSize(filename);
+    // double ratio = compressedSz / cast(double)len;
 
-    writefln("%s of %sMb of %s data took %s ms", algo, len / (1000*1000), datatype, time.total!"msecs");
-    writefln("    compressed size = %.1fKb (compression ratio = %s)", compressedSz / 1000.0, ratio);
+    // writefln("%s of %sMb of %s data took %s ms", algo, len / (1000*1000), datatype, time.total!"msecs");
+    // writefln("    compressed size = %.1fKb (compression ratio = %s)", compressedSz / 1000.0, ratio);
 }
