@@ -1043,7 +1043,7 @@ private abstract class ZipByChunk : ByteRange
 {
     ubyte[] moveFront()
     {
-        throw new UnsupportedRangeMethod(
+        throw new Exception(
             "Cannot move the front of a(n) Zip `Inflater`"
         );
     }
