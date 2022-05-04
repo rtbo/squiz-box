@@ -514,7 +514,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
             while (cdi.numEntries != 0)
             {
                 CentralFileHeader header = void;
-                input.read(&header);
+                input.readValue(&header);
                 enforce(
                     header.signature == CentralFileHeader.expectedSignature,
                     "Corrupted Zip: Expected Central directory header"
@@ -579,7 +579,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
             {
                 input.seek(pos);
                 EndOfCentralDirectory record = void;
-                input.read(&record);
+                input.readValue(&record);
                 if (record.signature == EndOfCentralDirectory.expectedSignature)
                 {
                     enforce(
@@ -615,7 +615,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
 
             input.seek(endCentralDirRecordPos - Zip64EndOfCentralDirLocator.sizeof);
             Zip64EndOfCentralDirLocator locator = void;
-            input.read(&locator);
+            input.readValue(&locator);
             enforce(
                 locator.signature == Zip64EndOfCentralDirLocator.expectedSignature,
                 "Corrupted Zip: Expected Zip64 end of central directory locator"
@@ -623,7 +623,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
 
             input.seek(locator.zip64EndOfCentralDirRecordOffset.val);
             Zip64EndOfCentralDirRecord record = void;
-            input.read(&record);
+            input.readValue(&record);
             enforce(
                 record.signature == Zip64EndOfCentralDirRecord.expectedSignature,
                 "Corrupted Zip: Expected Zip64 end of central directory record"
@@ -703,7 +703,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
         import std.datetime.systime : DosFileTimeToSysTime, unixTimeToStdTime, SysTime;
 
         LocalFileHeader header = void;
-        input.read(&header);
+        input.readValue(&header);
         if (header.signature == CentralFileHeader.expectedSignature)
         {
             // last entry was consumed

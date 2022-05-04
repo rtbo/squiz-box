@@ -47,15 +47,6 @@ interface Cursor
     ubyte get()
     in (!eoi);
 
-    /// Similar to read!T, but returns the value.
-    /// This form may be preferred for smaller values (e.g. a few bytes)
-    T get(T)()
-    {
-        T val = void;
-        read(&val);
-        return val;
-    }
-
     /// Read up to buffer.length bytes into buffer and return what was read.
     /// Returns a smaller slice only if EOI was reached.
     ubyte[] read(ubyte[] buffer);
@@ -63,7 +54,7 @@ interface Cursor
     /// Read T.sizeof data and returns it as a T.
     /// Similar to get!T but the value is passed as pointer to be filled in.
     /// Prefer this form for greater values (e.g. dozens of bytes)
-    void read(T)(T* val) if (!isDynamicArray!T)
+    void readValue(T)(T* val) if (!isDynamicArray!T)
     {
         import std.exception : enforce;
 
