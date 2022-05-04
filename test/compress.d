@@ -147,9 +147,6 @@ unittest
     const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
     const len = 1000*1000;
 
-    generateRepetitiveData(len, phrase, 8192)
-        .writeBinaryFile("data");
-
     testCompressData!({
         SHA1 sha;
         bool sha1(ubyte[] bytes)

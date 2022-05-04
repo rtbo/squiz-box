@@ -134,7 +134,7 @@ unittest
     import std.algorithm : map, sum;
     import std.file : read;
 
-    auto archive = Path("archive", ".tar");
+    auto archive = DeleteMe("archive", ".tar");
     auto base = dataGenPath();
 
     filesForArchive()
