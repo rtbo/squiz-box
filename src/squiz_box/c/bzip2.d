@@ -23,7 +23,7 @@ enum BZ_CONFIG_ERROR = (-9);
 
 struct bz_stream
 {
-    ubyte* next_in;
+    const(ubyte)* next_in;
     uint avail_in;
     uint total_in_lo32;
     uint total_in_hi32;

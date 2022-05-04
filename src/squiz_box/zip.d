@@ -60,7 +60,7 @@ private struct ZipArchiveCreate(I)
         return outChunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return outChunk;
     }
@@ -381,7 +381,7 @@ private class Deflater
 
         calculatedCrc32 = crc32(0, null, 0);
 
-        ubyte[] inChunk;
+        ByteChunk inChunk;
 
         while (true)
         {
@@ -1048,7 +1048,7 @@ private abstract class ZipByChunk : ByteRange
         );
     }
 
-    int opApply(scope int delegate(ubyte[]) dg)
+    int opApply(scope int delegate(ByteChunk) dg)
     {
         int res;
 
@@ -1063,7 +1063,7 @@ private abstract class ZipByChunk : ByteRange
         return res;
     }
 
-    int opApply(scope int delegate(size_t, ubyte[]) dg)
+    int opApply(scope int delegate(size_t, ByteChunk) dg)
     {
         int res;
 
@@ -1117,7 +1117,7 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
         return size == 0 && outChunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return outChunk;
     }
@@ -1203,7 +1203,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
         return compressedSz == 0 && outChunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return outChunk;
     }

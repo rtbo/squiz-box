@@ -66,7 +66,7 @@ private struct TarArchiveCreate(I)
         return true;
     }
 
-    @property const(ubyte)[] front()
+    @property ByteChunk front()
     {
         return chunk;
     }

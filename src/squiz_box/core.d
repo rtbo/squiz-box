@@ -4,8 +4,10 @@ import std.datetime.systime;
 import std.exception;
 import std.range.interfaces;
 
+alias ByteChunk = const(ubyte)[];
+
 /// A dynamic type of input range of chunks of bytes
-alias ByteRange = InputRange!(ubyte[]);
+alias ByteRange = InputRange!ByteChunk;
 
 /// Static check that a type is a byte range.
 template isByteRange(BR)
@@ -58,7 +60,7 @@ auto readBinaryFile(string filename, size_t chunkSize = defaultChunkSize)
 {
     import std.stdio : File;
 
-    return File(filename, "rb").byChunk(chunkSize);
+    return ByChunkImpl(File(filename, "rb"), chunkSize);
 }
 
 /// Helper that eagerly writes binary chunks of data to a file.
@@ -413,6 +415,70 @@ class FileArchiveEntry : ArchiveCreateEntry
     {
         import std.stdio : File;
 
-        return inputRangeObject(File(filePath, "rb").byChunk(chunkSize));
+        return inputRangeObject(ByChunkImpl(File(filePath, "rb"), chunkSize));
+    }
+}
+
+/// same as std.stdio.File.byChunk but returns const(ubyte)[]
+private struct ByChunkImpl
+{
+    import std.stdio : File;
+
+private:
+    File    file_;
+    ubyte[] chunk_;
+
+    void prime()
+    {
+        chunk_ = file_.rawRead(chunk_);
+        if (chunk_.length == 0)
+            file_.detach();
+    }
+
+public:
+    this(File file, size_t size)
+    {
+        this(file, new ubyte[](size));
+    }
+
+    this(File file, ubyte[] buffer)
+    {
+        import std.exception : enforce;
+        enforce(buffer.length, "size must be larger than 0");
+        file_ = file;
+        chunk_ = buffer;
+        prime();
+    }
+
+    // `ByChunk`'s input range primitive operations.
+    @property nothrow
+    bool empty() const
+    {
+        return !file_.isOpen;
+    }
+
+    /// Ditto
+    @property nothrow
+    const(ubyte)[] front()
+    {
+        version (assert)
+        {
+            import core.exception : RangeError;
+            if (empty)
+                throw new RangeError();
+        }
+        return chunk_;
+    }
+
+    /// Ditto
+    void popFront()
+    {
+        version (assert)
+        {
+            import core.exception : RangeError;
+            if (empty)
+                throw new RangeError();
+        }
+        prime();
     }
 }

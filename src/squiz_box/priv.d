@@ -2,7 +2,7 @@ module squiz_box.priv;
 
 package(squiz_box):
 
-import squiz_box.core : defaultChunkSize, EntryType, isByteRange;
+import squiz_box.core : ByteChunk, defaultChunkSize, EntryType, isByteRange;
 
 import std.datetime.systime;
 import std.exception;
@@ -107,7 +107,7 @@ final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
     private ulong _pos;
-    private ubyte[] _chunk;
+    private ByteChunk _chunk;
 
     this(BR input)
     {
@@ -403,7 +403,7 @@ struct CursorByteRange
         return (_input.eoi || _input.pos >= _end) && _chunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return _chunk;
     }
@@ -430,12 +430,12 @@ struct CompressDecompressAlgo(I, P)
     P.Stream* stream;
 
     /// Byte chunk from the input, provided to the stream
-    ubyte[] inChunk;
+    ByteChunk inChunk;
 
     /// Buffer used to read from stream
     ubyte[] outBuffer;
     /// Slice of the buffer that is valid for read out
-    ubyte[] outChunk;
+    ByteChunk outChunk;
 
     /// Whether the end of stream was reported by the Policy
     bool ended;
@@ -453,7 +453,7 @@ struct CompressDecompressAlgo(I, P)
         return outChunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return outChunk;
     }

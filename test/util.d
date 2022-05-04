@@ -161,9 +161,9 @@ private struct SequentialDataGen
         return chunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
-        return cast(ubyte[]) chunk;
+        return cast(ByteChunk) chunk;
     }
 
     void popFront()
@@ -239,7 +239,7 @@ private struct RepetitiveDataGen
         return chunk.length == 0;
     }
 
-    @property ubyte[] front()
+    @property ByteChunk front()
     {
         return chunk;
     }

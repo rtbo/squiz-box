@@ -44,7 +44,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
@@ -71,7 +71,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
@@ -121,7 +121,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
@@ -149,7 +149,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
@@ -202,7 +202,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
@@ -229,7 +229,7 @@ unittest
 
     testCompressData!({
         SHA1 sha;
-        bool sha1(ubyte[] bytes)
+        bool sha1(ByteChunk bytes)
         {
             sha.put(bytes);
             return true;
