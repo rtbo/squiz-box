@@ -25,13 +25,14 @@ if host_machine.system() == 'windows'
     squiz_ver = ['Windows10']
 endif
 
+squiz_deps = [bz2_dep, xz_dep]
+
 squiz_lib = library('squiz-box', squiz_src,
     install: true,
     include_directories: squiz_inc,
+    dependencies: squiz_deps,
     d_module_versions: squiz_ver,
 )
-
-squiz_deps = [bz2_dep, xz_dep]
 
 squiz_dep = declare_dependency(
     link_with: squiz_lib,
@@ -50,7 +51,9 @@ squiz_test_src = squiz_src + files([
 squiz_test_exe = executable('squiz-test', squiz_test_src,
     d_unittest: true,
     install: false,
-    dependencies: squiz_dep,
+    include_directories: squiz_inc,
+    dependencies: squiz_deps,
+    d_module_versions: squiz_ver,
 )
 
 test('unit tests', squiz_test_exe)
