@@ -314,6 +314,8 @@ class FileCursor : SearchableCursor
         // for efficiency we use getc
         import core.stdc.stdio : getc;
 
+        assert(_file.tell == _pos);
+
         _pos++;
         enforce(_pos <= _end, "No more bytes");
         return cast(ubyte)getc(_file.getFP());
@@ -322,6 +324,8 @@ class FileCursor : SearchableCursor
     ubyte[] read(ubyte[] buffer)
     {
         import std.algorithm : min;
+
+        assert(_file.tell == _pos);
 
         const len = cast(size_t) min(buffer.length, _end - _pos);
         auto result = _file.rawRead(buffer[0 .. len]);
@@ -334,6 +338,7 @@ class FileCursor : SearchableCursor
     {
         import std.algorithm : min;
 
+        assert(_file.tell == _pos);
         assert(_buffer.length > 0, "FileDataAdapter constructed without buffer. Use read(buffer)");
 
         const l = min(len, _end - _pos, _buffer.length);
