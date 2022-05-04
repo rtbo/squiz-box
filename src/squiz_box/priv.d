@@ -98,7 +98,7 @@ interface SearchableCursor : Cursor
 }
 
 /// Range based data input
-class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
+final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
     private ulong _pos;
@@ -186,7 +186,7 @@ class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
     }
 }
 
-class ArrayCursor : SearchableCursor
+final class ArrayCursor : SearchableCursor
 {
     private ubyte[] _array;
     private size_t _pos;
@@ -251,7 +251,7 @@ class ArrayCursor : SearchableCursor
 }
 
 /// The cursor MUST have exclusive access on the file
-class FileCursor : SearchableCursor
+final class FileCursor : SearchableCursor
 {
     import std.stdio : File;
 
