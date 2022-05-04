@@ -28,6 +28,11 @@ extern (C) void gcFree(void* opaque, void* addr) nothrow
 /// ease the implementation of an algorithm
 interface Cursor
 {
+    /// The name of the data source
+    /// For FileCursor, this will be the filename,
+    /// otherwise a description of the type of data.
+    @property string name();
+
     /// Position in the stream (how many bytes read so far)
     @property ulong pos();
 
@@ -112,6 +117,11 @@ final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
             _chunk = _input.front;
     }
 
+    @property string name()
+    {
+        return "Byte Range";
+    }
+
     @property ulong pos()
     {
         return _pos;
@@ -194,6 +204,11 @@ final class ArrayCursor : SearchableCursor
     this(ubyte[] array)
     {
         _array = array;
+    }
+
+    @property string name()
+    {
+        return "Byte Array";
     }
 
     @property ulong pos()
@@ -281,6 +296,11 @@ final class FileCursor : SearchableCursor
         const bufSize = min(bufferSize, _end - _start);
         if (bufSize > 0)
             _buffer = new ubyte[bufSize];
+    }
+
+    @property string name()
+    {
+        return _file.name;
     }
 
     @property ulong pos()
