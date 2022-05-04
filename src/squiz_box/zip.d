@@ -522,8 +522,11 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
 
                 ZipEntryInfo info = void;
 
-                info.path = cast(string)(input.readLength(header.fileNameLength.val).idup);
-                const extraFieldData = input.readLength(header.extraFieldLength.val);
+                info.path = cast(string) input.read(fieldBuf[0 .. header.fileNameLength.val]).idup;
+                enforce(info.path.length == header.fileNameLength.val, "Unexpected end of input");
+
+                const extraFieldData = input.read(fieldBuf[0 .. header.extraFieldLength.val]);
+                enforce(extraFieldData.length == header.extraFieldLength.val, "Unexpected end of input");
 
                 const efInfo = ExtraFieldInfo.parse(extraFieldData);
 

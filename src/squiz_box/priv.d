@@ -88,7 +88,6 @@ interface Cursor
 
 /// A Cursor whose size is known and that can seek to arbitrary positions,
 /// including backwards.
-/// Implementers other than ubyte[] MUST have internal buffer.
 interface SearchableCursor : Cursor
 {
     /// Complete size of the data
@@ -96,10 +95,6 @@ interface SearchableCursor : Cursor
 
     /// Seek to a new position (relative to beginning)
     void seek(ulong pos);
-
-    /// Read up to len bytes and return what was read.
-    /// Returns an array smaller than len only if EOI was reached, or if internal buffer is too small.
-    const(ubyte)[] readLength(size_t len);
 }
 
 /// Range based data input
@@ -198,10 +193,10 @@ final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 
 final class ArrayCursor : SearchableCursor
 {
-    private ubyte[] _array;
+    private const(ubyte)[] _array;
     private size_t _pos;
 
-    this(ubyte[] array)
+    this(const(ubyte)[] array)
     {
         _array = array;
     }
@@ -254,7 +249,9 @@ final class ArrayCursor : SearchableCursor
         return buffer[0 .. l];
     }
 
-    const(ubyte)[] readLength(size_t len)
+    /// Read up to len bytes from the inner array and return what was read.
+    /// Returns an array smaller than len only if EOI was reached.
+    const(ubyte)[] readInner(size_t len)
     {
         import std.algorithm : min;
 
@@ -352,20 +349,6 @@ final class FileCursor : SearchableCursor
         _pos += result.length;
         assert(_pos <= _end);
         return result;
-    }
-
-    const(ubyte)[] readLength(size_t len)
-    {
-        import std.algorithm : min;
-
-        assert(_file.tell == _pos);
-        assert(_buffer.length > 0, "FileDataAdapter constructed without buffer. Use read(buffer)");
-
-        const l = min(len, _end - _pos, _buffer.length);
-        auto res = _file.rawRead(_buffer[0 .. l]);
-        _pos += res.length;
-        assert(_pos <= _end);
-        return res;
     }
 }
 
