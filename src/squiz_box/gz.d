@@ -1,9 +1,8 @@
 module squiz_box.gz;
 
+import squiz_box.c.zlib;
 import squiz_box.core;
 import squiz_box.priv;
-
-import etc.c.zlib;
 
 import std.exception;
 import std.typecons;
