@@ -47,6 +47,15 @@ interface Cursor
     ubyte get()
     in (!eoi);
 
+    /// Get a value of type T.
+    /// Is a convenience over readValue.
+    T getValue(T)()
+    {
+        T val = void;
+        readValue(&val);
+        return val;
+    }
+
     /// Read up to buffer.length bytes into buffer and return what was read.
     /// Returns a smaller slice only if EOI was reached.
     ubyte[] read(ubyte[] buffer);
@@ -92,12 +101,14 @@ interface SearchableCursor : Cursor
 final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
+    private string _name;
     private ulong _pos;
     private ByteChunk _chunk;
 
-    this(BR input)
+    this(BR input, string name = "Byte Range")
     {
         _input = input;
+        _name = name;
 
         if (!_input.empty)
             _chunk = _input.front;
@@ -105,7 +116,7 @@ final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 
     @property string name()
     {
-        return "Byte Range";
+        return _name;
     }
 
     @property ulong pos()
@@ -186,15 +197,17 @@ final class ArrayCursor : SearchableCursor
 {
     private const(ubyte)[] _array;
     private size_t _pos;
+    private string _name;
 
-    this(const(ubyte)[] array)
+    this(const(ubyte)[] array, string name = "Byte Array")
     {
         _array = array;
+        _name = name;
     }
 
     @property string name()
     {
-        return "Byte Array";
+        return _name;
     }
 
     @property ulong pos()
