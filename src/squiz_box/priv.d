@@ -8,14 +8,14 @@ import std.datetime.systime;
 import std.exception;
 import std.traits : isDynamicArray, isIntegral;
 
-extern (C) void* gcAlloc(T)(void* opaque, T n, T m) if (isIntegral!T)
+extern (C) void* gcAlloc(T)(void* opaque, T n, T m) nothrow if (isIntegral!T)
 {
     import core.memory : GC;
 
     return GC.malloc(n * m);
 }
 
-extern (C) void gcFree(void* opaque, void* addr)
+extern (C) void gcFree(void* opaque, void* addr) nothrow
 {
     import core.memory : GC;
 
