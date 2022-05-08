@@ -382,15 +382,25 @@ struct GzHeader
         return res;
     }
 
+    private byte* toLatin1z(string str)
+    {
+        import std.encoding : Latin1Char, transcode;
+
+        Latin1Char[] l1;
+        transcode(str, l1);
+        auto res = (cast(byte[]) l1) ~ 0;
+        return res.ptr;
+    }
+
     private this(gz_headerp gzh)
     {
         text = gzh.text ? Yes.text : No.text;
         mtime = SysTime(unixTimeToStdTime(gzh.time));
         os = cast(Os) gzh.os;
         if (gzh.name)
-            filename = strz(gzh.name);
+            filename = fromLatin1z(gzh.name);
         if (gzh.comment)
-            comment = strz(gzh.comment);
+            comment = fromLatin1z(gzh.comment);
     }
 
     private gz_headerp toZlib()
@@ -402,15 +412,9 @@ struct GzHeader
         gzh.time = stdTimeToUnixTime!(c_long)(mtime.stdTime);
         gzh.os = cast(int) os;
         if (filename)
-        {
-            auto f = filename.dup ~ "\0";
-            gzh.name = cast(byte*) f.ptr;
-        }
+            gzh.name = toLatin1z(filename);
         if (comment)
-        {
-            auto c = comment.dup ~ "\0";
-            gzh.comment = cast(byte*) c.ptr;
-        }
+            gzh.comment = toLatin1z(comment);
         return gzh;
     }
 }
