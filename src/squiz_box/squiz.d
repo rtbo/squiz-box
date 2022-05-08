@@ -1,4 +1,8 @@
-/// Compression, decompression functions
+/// Compression, decompression algorithms
+///
+/// Each compression or decompression algorithm is represented by a struct
+/// that contains parameters for compression/decompression.
+///
 module squiz_box.squiz;
 
 import squiz_box.c.zlib;
@@ -60,22 +64,19 @@ if (isSquizAlgo!A)
 unittest
 {
     import test.util;
-
     import std.array : join;
 
-    auto def = squizAlgo(Deflate.init);
-    auto inf = squizAlgo(Inflate.init);
+    auto ctAlgo = Deflate.init;
+    auto rtAlgo = squizAlgo(Deflate.init);
 
     const len = 10_000;
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
-    const squized = [input].squiz(def).join();
+    const ctSquized = [input].squiz(ctAlgo).join();
+    const rtSquized = [input].squiz(rtAlgo).join();
 
-    const output = [squized].squiz(inf).join();
-
-    assert(squized.length < input.length);
-    assert(output == input);
+    assert(ctSquized == rtSquized);
 }
 
 private class CSquizAlgo(A) : SquizAlgo
@@ -210,26 +211,26 @@ auto squizReuse(I, A, S)(I input, A algo, S state, ubyte[] chunkBuffer)
 // if Yes.end, the state is ended when data is done processing
 private struct Squiz(I, A, Flag!"endState" endState)
 {
-    alias State = StateType!A;
+    private alias State = StateType!A;
 
     // Byte input range (by chunks)
-    I input;
+    private I input;
 
     // The algorithm
-    A algo;
+    private A algo;
 
     // Processed stream state
-    State state;
+    private State state;
 
     // Buffer used to store the front chunk
-    ubyte[] chunkBuffer;
+    private ubyte[] chunkBuffer;
     // Slice of the buffer that is valid for read out
-    ByteChunk chunk;
+    private ByteChunk chunk;
 
     /// Whether the end of stream was reported by the Policy
-    bool ended;
+    private bool ended;
 
-    this(I input, A algo, State state, ubyte[] chunkBuffer)
+    private this(I input, A algo, State state, ubyte[] chunkBuffer)
     {
         this.input = input;
         this.algo = algo;
@@ -281,70 +282,6 @@ private struct Squiz(I, A, Flag!"endState" endState)
             }
         }
     }
-}
-
-/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
-/// The produced stream of data is wrapped by Zlib header and trailer.
-auto deflate(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
-{
-    auto algo = Deflate.init;
-    algo.level = level;
-    return squiz(input, algo, chunkSize);
-}
-
-/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
-/// The produced stream of data is wrapped by Gzip header and trailer.
-/// header can be supplied to replace the default header produced by Zlib.
-auto deflateGz(I)(I input, int level = 6, Nullable!GzHeader header = null, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
-{
-    auto algo = Deflate.init;
-    algo.format = ZlibFormat.gz;
-    algo.level = level;
-    algo.gzHeader = header;
-    return squiz(input, algo, chunkSize);
-}
-
-/// ditto
-auto deflateGz(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
-{
-    auto algo = Deflate.init;
-    algo.format = ZlibFormat.gz;
-    algo.level = level;
-    return squiz(input, algo, chunkSize);
-}
-
-/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
-/// The produced stream of data isn't wrapped by any header or trailer.
-auto deflateRaw(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
-{
-    auto algo = Deflate.init;
-    algo.format = ZlibFormat.raw;
-    algo.level = level;
-    return squiz(input, algo, chunkSize);
-}
-
-auto inflate(I)(I input, size_t chunkSize = defaultChunkSize)
-{
-    return squiz(input, Inflate.init, chunkSize);
-}
-
-auto inflateGz(I)(I input, GzHeader* header, size_t chunkSize = defaultChunkSize)
-{
-    auto algo = Inflate.init;
-    algo.format = ZlibFormat.gz;
-    algo.gzHeader = header;
-    return squiz(input, algo, chunkSize);
-}
-
-auto inflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
-{
-    auto algo = Inflate.init;
-    algo.format = ZlibFormat.raw;
-    return squiz(input, algo, chunkSize);
 }
 
 /// Describe what type of header and trailer are wrapping
@@ -501,6 +438,50 @@ class ZlibState : SquizState
 
 }
 
+/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
+/// The produced stream of data is wrapped by Zlib header and trailer.
+auto deflate(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
+{
+    auto algo = Deflate.init;
+    algo.level = level;
+    return squiz(input, algo, chunkSize);
+}
+
+/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
+/// The produced stream of data is wrapped by Gzip header and trailer.
+/// header can be supplied to replace the default header produced by Zlib.
+auto deflateGz(I)(I input, int level = 6, Nullable!GzHeader header = null, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
+{
+    auto algo = Deflate.init;
+    algo.format = ZlibFormat.gz;
+    algo.level = level;
+    algo.gzHeader = header;
+    return squiz(input, algo, chunkSize);
+}
+
+/// ditto
+auto deflateGz(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
+{
+    auto algo = Deflate.init;
+    algo.format = ZlibFormat.gz;
+    algo.level = level;
+    return squiz(input, algo, chunkSize);
+}
+
+/// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
+/// The produced stream of data isn't wrapped by any header or trailer.
+auto deflateRaw(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
+{
+    auto algo = Deflate.init;
+    algo.format = ZlibFormat.raw;
+    algo.level = level;
+    return squiz(input, algo, chunkSize);
+}
+
 /// Zlib's deflate algorithm
 struct Deflate
 {
@@ -520,6 +501,8 @@ struct Deflate
 
     /// Advanced parameters
     /// See zlib's documentation of `deflateInit2`.
+    /// windowBits must be between 9 and 15 included
+    /// and is adjusted according chosen format.
     int windowBits = 15;
     /// ditto
     int memLevel = 8;
@@ -533,8 +516,8 @@ struct Deflate
     State initialize()
     {
         assert(
-            windowBits <= 15 && windowBits >= 9,
-            "unsupported window size"
+            9 <= windowBits && windowBits <= 15,
+            "inconsistent windowBits"
         );
         int wb = windowBits;
         final switch (format)
@@ -597,12 +580,39 @@ struct Deflate
     }
 }
 
-alias GzHeaderDg = void delegate(GzHeader header);
+/// Returns an InputRange streaming over data inflated with Zlib.
+/// The input data must be deflated with a zlib format.
+auto inflate(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, Inflate.init, chunkSize);
+}
+
+/// Returns an InputRange streaming over data inflated with Zlib.
+/// The input data must be deflated with a gz format.
+auto inflateGz(I)(I input, GzHeader* header, size_t chunkSize = defaultChunkSize)
+{
+    auto algo = Inflate.init;
+    algo.format = ZlibFormat.gz;
+    algo.gzHeader = header;
+    return squiz(input, algo, chunkSize);
+}
+
+/// Returns an InputRange streaming over data inflated with Zlib.
+/// The input must be raw deflated data
+auto inflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    auto algo = Inflate.init;
+    algo.format = ZlibFormat.raw;
+    return squiz(input, algo, chunkSize);
+}
 
 /// Zlib's inflate algorithm
 struct Inflate
 {
     static assert(isSquizAlgo!Inflate);
+
+    /// Type of delegate to use as callback for gzHeaderDg
+    alias GzHeaderDg = void delegate(GzHeader header);
 
     /// Which format to use for the deflated stream.
     /// In case ZlibFormat.gz, the gzHeader field will be written if set.
@@ -646,7 +656,8 @@ struct Inflate
     {
         assert(
             (windowBits == 0 && format == ZlibFormat.zlib) ||
-                (windowBits >= 9 && windowBits <= 15)
+                (9 <= windowBits && windowBits <= 15),
+            "inconsistent windowBits"
         );
         int wb = windowBits;
         final switch (format)
@@ -712,6 +723,34 @@ struct Inflate
     {
         inflateEnd(&state.strm);
     }
+}
+
+///
+@("Delfate / Inflate")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    auto def = Deflate.init;
+    auto inf = Inflate.init;
+
+    const len = 10_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    // deflating
+    const squized = [input].squiz(def).join();
+
+    // re-inflating
+    const output = [squized].squiz(inf).join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such repetitive data, ratio is around 0.8%
+    const ratio = cast(double)squized.length / cast(double)input.length;
+    assert(ratio < 0.01);
 }
 
 package string zResultToString(int res)
