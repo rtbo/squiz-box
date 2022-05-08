@@ -16,7 +16,7 @@
 /// that give the decompression algorithm useful information, especially
 /// to check the integrity of the data after decompression.
 /// This is called the format.
-/// Compressions algorithms may offer different formats, and sometimes
+/// Some compressions algorithms offer different formats, and sometimes
 /// the possibility to not wrap the data at all (raw format), in which
 /// case integrity check is not performed. This is usually used when
 /// an external integrity check is done, for example when archiving
@@ -66,9 +66,27 @@ template StreamType(A) if (isSquizAlgo!A)
 /// This helps to choose algorithm at run time.
 interface SquizAlgo
 {
+    /// Initialize a new stream for processing data
+    /// with this algorithm.
     SquizStream initialize();
-    Flag!"streamEnded" process(SquizStream, Flag!"inputEmpty");
+
+    /// Processes the input stream data to produce output stream data.
+    /// inputEmpty indicates that the input chunk in stream is the last one.
+    /// This is an indication to the algorithm that it can start to finish
+    /// the work.
+    /// Returned value indicates that there won't be more output generated
+    /// than the one in stream.output
+    Flag!"streamEnded" process(SquizStream stream, Flag!"inputEmpty" inputEmpty);
+
+    /// Reset the state of this stream, yet reusing the same
+    /// allocating resources, in order to start processing
+    /// another data stream.
     void reset(SquizStream stream);
+
+    /// Release the resources used by this stream.
+    /// Most of the memory (if not all) used by algorithm
+    /// is allocating with the garbage collector, so not
+    /// calling this function has little consequence (if not none).
     void end(SquizStream stream);
 }
 
@@ -192,11 +210,6 @@ private mixin template StreamImpl(S) if (isZlibLikeStream!S)
         strm.avail_in = cast(typeof(strm.avail_in)) inp.length;
     }
 
-    @property size_t totalInput() const
-    {
-        return cast(size_t) strm.total_in;
-    }
-
     @property inout(ubyte)[] output() inout
     {
         return strm.next_out[0 .. strm.avail_out];
@@ -206,6 +219,14 @@ private mixin template StreamImpl(S) if (isZlibLikeStream!S)
     {
         strm.next_out = outp.ptr;
         strm.avail_out = cast(typeof(strm.avail_out)) outp.length;
+    }
+}
+
+mixin template StreamTotalInOutImpl()
+{
+    @property size_t totalInput() const
+    {
+        return cast(size_t) strm.total_in;
     }
 
     @property size_t totalOutput() const
@@ -408,7 +429,6 @@ struct GzHeader
         _mtime = stdTimeToUnixTime(time.stdTime);
     }
 
-
     /// Operating system that wrote the gz file
     Os os = defaultOs;
 
@@ -486,9 +506,10 @@ Flag!"text" isText(const(ubyte)[] data)
     );
 }
 
-class ZlibStream : SquizStream
+private class ZlibStream : SquizStream
 {
     mixin StreamImpl!z_stream;
+    mixin StreamTotalInOutImpl!();
 
     private this()
     {
@@ -935,31 +956,280 @@ package string zFlushToString(int flush)
     }
 }
 
-package void zPrintStream(z_stream* strm, string label)
+/// Returns an InputRange containing the input data processed through Bzip2 compression.
+auto compressBzip2(I)(I input, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
 {
-    import std.stdio;
-    import std.string : fromStringz;
+    return squiz(input, CompressBzip2.init, chunkSize);
+}
 
-    if (label)
-        writefln("Stream %s:", label);
-    else
-        writefln("Stream:");
+private final class Bz2Stream : SquizStream
+{
+    mixin StreamImpl!(bz_stream);
 
-    if (!strm)
+    @property size_t totalInput() const
     {
-        writeln("    null");
-        return;
+        ulong hi = strm.total_in_hi32;
+        return cast(size_t) (
+            (hi << 32) | strm.total_in_lo32
+        );
     }
-    else
+
+    @property size_t totalOutput() const
     {
-        writeln("    address = %x", cast(void*) strm);
+        ulong hi = strm.total_out_hi32;
+        return cast(size_t) (
+            (hi << 32) | strm.total_out_lo32
+        );
     }
-    writeln("    next_in = ", strm.next_in);
-    writeln("    avail_in = ", strm.avail_in);
-    writeln("    total_in = ", strm.total_in);
-    writeln("    next_out = ", strm.next_out);
-    writeln("    avail_out = ", strm.avail_out);
-    writeln("    total_out = ", strm.total_out);
-    if (strm.msg)
-        writeln("    msg = ", fromStringz(strm.msg));
+
+    this()
+    {
+        strm.bzalloc = &(gcAlloc!int);
+        strm.bzfree = &gcFree;
+    }
+}
+
+/// Compression with the Bzip2 algorithm.
+///
+/// Although having better compression capabilities than Zlib (deflate),
+/// Bzip2 has poor latenty when it comes to streaming.
+/// I.e. it can swallow several Mb of data before starting to produce output.
+/// If streaming latenty is an important factor, deflate/inflate
+/// should be the favorite algorithm.
+///
+/// It should be known as well that Bzip2 tend to struggle to compress
+/// repetitive data, which are better handled by Zlib.
+/// This being said, for most input Bzip2 will provide 10% to 15% better
+/// compression than Zlib.
+///
+/// This algorithm does not support resource reuse, so calling reset
+/// is equivalent to a call to end followed by initialize.
+/// (but the same instance of stream is kept).
+struct CompressBzip2
+{
+    static assert (isSquizAlgo!CompressBzip2);
+
+    /// Advanced Bzip2 parameters
+    /// See Bzip2 documentation
+    /// https://www.sourceware.org/bzip2/manual/manual.html#bzcompress-init
+    int blockSize100k = 9;
+    /// ditto
+    int verbosity = 0;
+    /// ditto
+    int workFactor = 30;
+
+    alias Stream = Bz2Stream;
+
+    Stream initialize()
+    {
+        auto stream = new Stream;
+
+        const res = BZ2_bzCompressInit(
+            &stream.strm, blockSize100k, verbosity, workFactor,
+        );
+        enforce(
+            res == BZ_OK,
+            "Could not initialize Bzip2 compressor: " ~ bzResultToString(res)
+        );
+        return stream;
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    {
+        const action = inputEmpty ? BZ_FINISH : BZ_RUN;
+        const res = BZ2_bzCompress(&stream.strm, action);
+
+        if (res == BZ_STREAM_END)
+            return Yes.streamEnded;
+
+        enforce(
+            (action == BZ_RUN && res == BZ_RUN_OK) ||
+                (action == BZ_FINISH && res == BZ_FINISH_OK),
+                "Bzip2 compress failed with code: " ~ bzResultToString(res)
+        );
+
+        return No.streamEnded;
+    }
+
+    void reset(Stream stream)
+    {
+        BZ2_bzCompressEnd(&stream.strm);
+
+        stream.strm = bz_stream.init;
+        stream.strm.bzalloc = &(gcAlloc!int);
+        stream.strm.bzfree = &gcFree;
+
+        const res = BZ2_bzCompressInit(
+            &stream.strm, blockSize100k, verbosity, workFactor,
+        );
+        enforce(
+            res == BZ_OK,
+            "Could not initialize Bzip2 compressor: " ~ bzResultToString(res)
+        );
+    }
+
+    void end(Stream stream)
+    {
+        BZ2_bzCompressEnd(&stream.strm);
+    }
+}
+
+/// Returns an InputRange streaming over data decompressed with Bzip2.
+auto decompressBzip2(I)(I input, size_t chunkSize = defaultChunkSize)
+        if (isByteRange!I)
+{
+    return squiz(input, DecompressBzip2.init, chunkSize);
+}
+
+/// Decompression of data encoded with Bzip2.
+///
+/// This algorithm does not support resource reuse, so calling reset
+/// is equivalent to a call to end followed by initialize.
+/// (but the same instance of stream is kept).
+struct DecompressBzip2
+{
+    static assert (isSquizAlgo!DecompressBzip2);
+
+    /// Advanced Bzip2 parameters
+    /// See Bzip2 documentation
+    /// https://www.sourceware.org/bzip2/manual/manual.html#bzDecompress-init
+    int verbosity;
+    /// ditto
+    bool small;
+
+    alias Stream = Bz2Stream;
+
+    Stream initialize()
+    {
+        auto stream = new Stream;
+
+        const res = BZ2_bzDecompressInit(
+            &stream.strm, verbosity, small ? 1 : 0,
+        );
+        enforce(
+            res == BZ_OK,
+            "Could not initialize Bzip2 decompressor: " ~ bzResultToString(res)
+        );
+        return stream;
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    {
+        const res = BZ2_bzDecompress(&stream.strm);
+
+        if (res == BZ_DATA_ERROR)
+            throw new DataException("Input data was not compressed with Bzip2");
+
+        enforce(
+            res == BZ_OK || res == BZ_STREAM_END,
+            "Bzip2 decompress failed with code: " ~ bzResultToString(res)
+        );
+
+        return cast(Flag!"streamEnded")(res == BZ_STREAM_END);
+    }
+
+    void reset(Stream stream)
+    {
+        BZ2_bzDecompressEnd(&stream.strm);
+
+        stream.strm = bz_stream.init;
+        stream.strm.bzalloc = &(gcAlloc!int);
+        stream.strm.bzfree = &gcFree;
+
+        const res = BZ2_bzDecompressInit(
+            &stream.strm, verbosity, small ? 1 : 0,
+        );
+        enforce(
+            res == BZ_OK,
+            "Could not initialize Bzip2 decompressor: " ~ bzResultToString(res)
+        );
+    }
+
+    void end(Stream stream)
+    {
+        BZ2_bzDecompressEnd(&stream.strm);
+    }
+}
+
+///
+@("Compress / Decompress Bzip2")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 10_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    // deflating
+    const squized = [input]
+        .compressBzip2()
+        .join();
+
+    // re-inflating
+    const output = [squized]
+        .decompressBzip2()
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such repetitive data, ratio is around 1.13%
+    // also generally better than zlib, bzip2 struggles a lot for repetitive data
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.015);
+}
+
+private string bzActionToString(int action)
+{
+    switch (action)
+    {
+    case BZ_RUN:
+        return "RUN";
+    case BZ_FLUSH:
+        return "FLUSH";
+    case BZ_FINISH:
+        return "FINISH";
+    default:
+        return "(Unknown result)";
+    }
+}
+
+private string bzResultToString(int res)
+{
+    switch (res)
+    {
+    case BZ_OK:
+        return "OK";
+    case BZ_RUN_OK:
+        return "RUN_OK";
+    case BZ_FLUSH_OK:
+        return "FLUSH_OK";
+    case BZ_FINISH_OK:
+        return "FINISH_OK";
+    case BZ_STREAM_END:
+        return "STREAM_END";
+    case BZ_SEQUENCE_ERROR:
+        return "SEQUENCE_ERROR";
+    case BZ_PARAM_ERROR:
+        return "PARAM_ERROR";
+    case BZ_MEM_ERROR:
+        return "MEM_ERROR";
+    case BZ_DATA_ERROR:
+        return "DATA_ERROR";
+    case BZ_DATA_ERROR_MAGIC:
+        return "DATA_ERROR_MAGIC";
+    case BZ_IO_ERROR:
+        return "IO_ERROR";
+    case BZ_UNEXPECTED_EOF:
+        return "UNEXPECTED_EOF";
+    case BZ_OUTBUFF_FULL:
+        return "OUTBUFF_FULL";
+    case BZ_CONFIG_ERROR:
+        return "CONFIG_ERROR";
+    default:
+        return "(Unknown result)";
+    }
 }
