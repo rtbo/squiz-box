@@ -75,8 +75,7 @@ interface SquizAlgo
 static assert(isSquizAlgo!SquizAlgo);
 
 /// Get a runtime type for the provided algorithm
-SquizAlgo squizAlgo(A)(A algo)
-if (isSquizAlgo!A)
+SquizAlgo squizAlgo(A)(A algo) if (isSquizAlgo!A)
 {
     return new CSquizAlgo!A(algo);
 }
@@ -114,7 +113,7 @@ private class CSquizAlgo(A) : SquizAlgo
 
     private Stream checkStream(SquizStream stream)
     {
-        auto s = cast(Stream)stream;
+        auto s = cast(Stream) stream;
         assert(s, "provided stream is not produced by this algorithm");
         return s;
     }
@@ -178,8 +177,7 @@ private template isZlibLikeStream(S)
             }));
 }
 
-private mixin template StreamImpl(S)
-if (isZlibLikeStream!S)
+private mixin template StreamImpl(S) if (isZlibLikeStream!S)
 {
     S strm;
 
@@ -379,6 +377,7 @@ struct GzHeader
         unix = 3,
         macintosh = 7,
         ntFs = 11,
+        unknown = 255,
     }
 
     version (OSX)
@@ -393,8 +392,22 @@ struct GzHeader
     /// Whether the content is believed to be text
     Flag!"text" text;
 
+    // storing in unix format to avoid
+    // negative numbers with SysTime.init
+    private long _mtime;
+
     /// Modification time
-    SysTime mtime;
+    @property SysTime mtime() const
+    {
+        return SysTime(unixTimeToStdTime(_mtime));
+    }
+
+    /// ditto
+    @property void mtime(SysTime time)
+    {
+        _mtime = stdTimeToUnixTime(time.stdTime);
+    }
+
 
     /// Operating system that wrote the gz file
     Os os = defaultOs;
@@ -435,7 +448,7 @@ struct GzHeader
     private this(gz_headerp gzh)
     {
         text = gzh.text ? Yes.text : No.text;
-        mtime = SysTime(unixTimeToStdTime(gzh.time));
+        _mtime = gzh.time;
         os = cast(Os) gzh.os;
         if (gzh.name)
             filename = fromLatin1z(gzh.name);
@@ -449,7 +462,7 @@ struct GzHeader
 
         auto gzh = new gz_header;
         gzh.text = text ? 1 : 0;
-        gzh.time = stdTimeToUnixTime!(c_long)(mtime.stdTime);
+        gzh.time = _mtime;
         gzh.os = cast(int) os;
         if (filename)
             gzh.name = toLatin1z(filename);
@@ -458,6 +471,9 @@ struct GzHeader
         return gzh;
     }
 }
+
+/// Type of delegate to use as callback for Inflate.gzHeaderDg
+alias GzHeaderDg = void delegate(GzHeader header);
 
 /// Helper to set GzHeader.text
 /// Will check if the data are all ascii characters
@@ -493,8 +509,10 @@ auto deflate(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data is wrapped by Gzip header and trailer.
-/// header can be supplied to replace the default header produced by Zlib.
-auto deflateGz(I)(I input, int level = 6, Nullable!GzHeader header = null, size_t chunkSize = defaultChunkSize)
+/// Suppliying a header is entirely optional. Zlib produces a default header if not supplied.
+/// The default header has text false, mtime zero, unknown os, and
+/// no name or comment.
+auto deflateGz(I)(I input, GzHeader header, int level = 6, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
     auto algo = Deflate.init;
@@ -607,7 +625,7 @@ struct Deflate
             "Zlib deflate failed with code: " ~ zResultToString(res)
         );
 
-        return cast(Flag!"streamEnded") (res == Z_STREAM_END);
+        return cast(Flag!"streamEnded")(res == Z_STREAM_END);
     }
 
     void reset(Stream stream)
@@ -630,12 +648,20 @@ auto inflate(I)(I input, size_t chunkSize = defaultChunkSize)
 
 /// Returns an InputRange streaming over data inflated with Zlib.
 /// The input data must be deflated with a gz format.
-auto inflateGz(I)(I input, GzHeader* header, size_t chunkSize = defaultChunkSize)
+/// If headerDg is not null, it will be called
+/// as soon as the header is read from the stream.
+auto inflateGz(I)(I input, GzHeaderDg headerDg = null, size_t chunkSize = defaultChunkSize)
 {
     auto algo = Inflate.init;
     algo.format = ZlibFormat.gz;
-    algo.gzHeader = header;
+    algo.gzHeaderDg = headerDg;
     return squiz(input, algo, chunkSize);
+}
+
+/// ditto
+auto inflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return inflateGz(input, null, chunkSize);
 }
 
 /// Returns an InputRange streaming over data inflated with Zlib.
@@ -651,9 +677,6 @@ auto inflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
 struct Inflate
 {
     static assert(isSquizAlgo!Inflate);
-
-    /// Type of delegate to use as callback for gzHeaderDg
-    alias GzHeaderDg = void delegate(GzHeader header);
 
     /// Which format to use for the deflated stream.
     /// In case ZlibFormat.gz, the gzHeader field will be written if set.
@@ -698,7 +721,7 @@ struct Inflate
         assert(
             (windowBits == 0 && format == ZlibFormat.zlib) ||
                 (9 <= windowBits && windowBits <= 15),
-            "inconsistent windowBits"
+                "inconsistent windowBits"
         );
         int wb = windowBits;
         final switch (format)
@@ -753,7 +776,7 @@ struct Inflate
             gzh.dgCalled = true;
         }
 
-        return cast(Flag!"streamEnded") (res == Z_STREAM_END);
+        return cast(Flag!"streamEnded")(res == Z_STREAM_END);
     }
 
     package void reset(Stream stream)
@@ -791,8 +814,75 @@ unittest
     assert(output == input);
 
     // for such repetitive data, ratio is around 0.8%
-    const ratio = cast(double)squized.length / cast(double)input.length;
+    const ratio = cast(double) squized.length / cast(double) input.length;
     assert(ratio < 0.01);
+}
+
+///
+@("Deflate / Inflate in Gz format and custom header")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    GzHeader inHead;
+    inHead.mtime = Clock.currTime;
+    inHead.os = GzHeader.Os.fatFs;
+    inHead.text = Yes.text;
+    inHead.filename = "boring.txt";
+    inHead.comment = "A very boring file";
+
+    // deflating
+    const squized = [input]
+        .deflateGz(inHead)
+        .join();
+
+    // re-inflating
+    GzHeader outHead;
+    int numCalls;
+    void setOutHead(GzHeader gzh)
+    {
+        outHead = gzh;
+        numCalls++;
+    }
+
+    const output = [squized]
+        .inflateGz(&setOutHead)
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+    assert(inHead == outHead);
+    assert(numCalls == 1);
+}
+
+///
+@("Deflate / Inflate in raw format")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    // deflating
+    const squized = [input]
+        .deflateRaw(6)
+        .join();
+
+    // re-inflating
+    const output = [squized]
+        .inflateRaw()
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
 }
 
 package string zResultToString(int res)
