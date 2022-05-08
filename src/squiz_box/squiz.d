@@ -7,13 +7,13 @@ import squiz_box.priv;
 
 import std.datetime.systime;
 import std.exception;
+import std.range;
 import std.typecons;
 
 /// Check whether a type is a proper squiz algorithm.
 template isSquizAlgo(A)
 {
-    enum isSquizAlgo = is(typeof({
-                auto algo = A.init;
+    enum isSquizAlgo = is(typeof((A algo) {
                 auto state = algo.initialize();
                 Flag!"streamEnded" ended = algo.process(state, Yes.inputEmpty);
                 algo.reset(state);
@@ -24,30 +24,102 @@ template isSquizAlgo(A)
 }
 
 /// Get the type of a SquizState for the Squiz algorithm
-template StateType(A)
-if (isSquizAlgo!A)
+template StateType(A) if (isSquizAlgo!A)
 {
     import std.traits : ReturnType;
 
     alias StateType = ReturnType!(A.initialize);
 }
 
+/// A squiz algorithm whom type is erased behind an interface.
+/// This helps to choose algorithm at run time.
 interface SquizAlgo
 {
     SquizState initialize();
+    Flag!"streamEnded" process(SquizState, Flag!"inputEmpty");
     void reset(SquizState state);
     void end(SquizState state);
 }
 
-private interface SquizProcess
+static assert(isSquizAlgo!SquizAlgo);
+
+/// Runtime state for SquizAlgo
+interface SquizState : SquizStream
 {
-    Flag!"streamEnded" process(SquizState, Flag!"inputEmpty");
+}
+
+/// Get a runtime type for the provided algorithm
+SquizAlgo squizAlgo(A)(A algo)
+if (isSquizAlgo!A)
+{
+    return new CSquizAlgo!A(algo);
+}
+
+///
+@("squizAlgo")
+unittest
+{
+    import test.util;
+
+    import std.array : join;
+
+    auto def = squizAlgo(Deflate.init);
+    auto inf = squizAlgo(Inflate.init);
+
+    const len = 10_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    const squized = [input].squiz(def).join();
+
+    const output = [squized].squiz(inf).join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+}
+
+private class CSquizAlgo(A) : SquizAlgo
+{
+    alias State = StateType!A;
+
+    A algo;
+
+    private this(A algo)
+    {
+        this.algo = algo;
+    }
+
+    private State checkState(SquizState state)
+    {
+        auto s = cast(State)state;
+        assert(s, "provided state is not produced by this algorithm");
+        return s;
+    }
+
+    SquizState initialize()
+    {
+        return algo.initialize();
+    }
+
+    Flag!"streamEnded" process(SquizState state, Flag!"inputEmpty" inputEmpty)
+    {
+        return algo.process(checkState(state), inputEmpty);
+    }
+
+    void reset(SquizState state)
+    {
+        return algo.reset(checkState(state));
+    }
+
+    void end(SquizState state)
+    {
+        return algo.end(checkState(state));
+    }
 }
 
 private template isZlibLikeStream(S)
 {
-    enum isZlibLikeStream = is(typeof({
-                S stream;
+    enum isZlibLikeStream = is(typeof((S stream) {
                 stream.next_in = cast(const(ubyte)*) null;
                 stream.avail_in = 0;
                 stream.next_out = cast(ubyte*) null;
@@ -55,27 +127,61 @@ private template isZlibLikeStream(S)
             }));
 }
 
-interface SquizState
-{
-}
-
-private interface SquizStream
+/// A processing stream for squiz algorithms
+interface SquizStream
 {
     @property const(ubyte)[] input() const;
     @property void input(const(ubyte)[] inp);
     @property size_t totalInput() const;
+
     @property inout(ubyte)[] output() inout;
     @property void output(ubyte[] outp);
     @property size_t totalOutput() const;
+}
+
+private mixin template StreamImpl(S)
+if (isZlibLikeStream!S)
+{
+    S strm;
+
+    @property const(ubyte)[] input() const
+    {
+        return strm.next_in[0 .. strm.avail_in];
+    }
+
+    @property void input(const(ubyte)[] inp)
+    {
+        strm.next_in = inp.ptr;
+        strm.avail_in = cast(typeof(strm.avail_in)) inp.length;
+    }
+
+    @property size_t totalInput() const
+    {
+        return cast(size_t) strm.total_in;
+    }
+
+    @property inout(ubyte)[] output() inout
+    {
+        return strm.next_out[0 .. strm.avail_out];
+    }
+
+    @property void output(ubyte[] outp)
+    {
+        strm.next_out = outp.ptr;
+        strm.avail_out = cast(typeof(strm.avail_out)) outp.length;
+    }
+
+    @property size_t totalOutput() const
+    {
+        return cast(size_t) strm.total_out;
+    }
 }
 
 /// Returns an InputRange containing the input data processed through the supplied algorithm.
 auto squiz(I, A)(I input, A algo, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I && isSquizAlgo!A)
 {
-    auto state = algo.initialize();
-    auto buffer = new ubyte[chunkSize];
-    return Squiz!(I, A, typeof(state), Yes.endState)(input, algo, state, buffer);
+    return squiz(input, algo, new ubyte[chunkSize]);
 }
 
 /// ditto
@@ -83,7 +189,7 @@ auto squiz(I, A)(I input, A algo, ubyte[] chunkBuffer)
         if (isByteRange!I && isSquizAlgo!A)
 {
     auto state = algo.initialize();
-    return Squiz!(I, A, typeof(state), Yes.endState)(input, algo, state, chunkBuffer);
+    return Squiz!(I, A, Yes.endState)(input, algo, state, chunkBuffer);
 }
 
 /// Returns an InputRange containing the input data processed through the supplied algorithm.
@@ -94,16 +200,18 @@ auto squiz(I, A)(I input, A algo, ubyte[] chunkBuffer)
 auto squizReuse(I, A, S)(I input, A algo, S state, ubyte[] chunkBuffer)
         if (isByteRange!I && isSquizAlgo!A)
 {
-    return Squiz!(I, A, S, No.endState)(input, algo, state, chunkBuffer);
+    static assert(is(StateType!A == S), S.strinof ~ " is not the state produced by " ~ A.stringof);
+    return Squiz!(I, A, No.endState)(input, algo, state, chunkBuffer);
 }
 
 // Common transformation range for all compression/decompression functions.
 // I is a byte input range
 // A is a squiz algorithm
-// S is the state of the algorithm
 // if Yes.end, the state is ended when data is done processing
-private struct Squiz(I, A, S, Flag!"endState" endState)
+private struct Squiz(I, A, Flag!"endState" endState)
 {
+    alias State = StateType!A;
+
     // Byte input range (by chunks)
     I input;
 
@@ -111,7 +219,7 @@ private struct Squiz(I, A, S, Flag!"endState" endState)
     A algo;
 
     // Processed stream state
-    S state;
+    State state;
 
     // Buffer used to store the front chunk
     ubyte[] chunkBuffer;
@@ -121,7 +229,7 @@ private struct Squiz(I, A, S, Flag!"endState" endState)
     /// Whether the end of stream was reported by the Policy
     bool ended;
 
-    this(I input, A algo, S state, ubyte[] chunkBuffer)
+    this(I input, A algo, State state, ubyte[] chunkBuffer)
     {
         this.input = input;
         this.algo = algo;
@@ -381,44 +489,9 @@ Flag!"text" isText(const(ubyte)[] data)
     );
 }
 
-private mixin template StreamImpl()
+class ZlibState : SquizState
 {
-    @property const(ubyte)[] input() const
-    {
-        return strm.next_in[0 .. strm.avail_in];
-    }
-
-    @property void input(const(ubyte)[] inp)
-    {
-        strm.next_in = inp.ptr;
-        strm.avail_in = cast(typeof(strm.avail_in)) inp.length;
-    }
-
-    @property size_t totalInput() const
-    {
-        return cast(size_t) strm.total_in;
-    }
-
-    @property inout(ubyte)[] output() inout
-    {
-        return strm.next_out[0 .. strm.avail_out];
-    }
-
-    @property void output(ubyte[] outp)
-    {
-        strm.next_out = outp.ptr;
-        strm.avail_out = cast(typeof(strm.avail_out)) outp.length;
-    }
-
-    @property size_t totalOutput() const
-    {
-        return cast(size_t) strm.total_out;
-    }
-}
-
-class ZlibState : SquizState, SquizStream
-{
-    private z_stream strm;
+    mixin StreamImpl!z_stream;
 
     private this()
     {
@@ -426,7 +499,6 @@ class ZlibState : SquizState, SquizStream
         strm.zfree = &gcFree;
     }
 
-    mixin StreamImpl!();
 }
 
 /// Zlib's deflate algorithm
@@ -455,7 +527,8 @@ struct Deflate
     int strategy = Z_DEFAULT_STRATEGY;
 
     static final class State : ZlibState
-    {}
+    {
+    }
 
     State initialize()
     {
