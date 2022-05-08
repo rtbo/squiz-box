@@ -4,7 +4,7 @@ import test.archive;
 import test.util;
 import squiz_box.bz2;
 import squiz_box.core;
-import squiz_box.gz;
+import squiz_box.squiz;
 import squiz_box.xz;
 
 import std.typecons;
@@ -23,7 +23,7 @@ unittest
     enum bufSize = 8192;
 
     tarF.byChunk(bufSize)
-        .compressGz(6, bufSize)
+        .deflateGz(6, bufSize)
         .copy(tarXzF.lockingBinaryWriter);
 
     tarF.close();
@@ -49,13 +49,46 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
-            .compressGz(6, 8192)
+            .deflateGz(6, 8192)
             .writeBinaryFile(dataGz.path);
 
         return sha.finish();
     })(len, dataGz.path, "compressGz", "sequential", "gzip");
+}
+
+@("Compress GZ with reuse")
+unittest
+{
+    auto dataGz = DeleteMe("data", ".gz");
+
+    const len = 10_000;
+
+    Deflate algo;
+    algo.format = ZlibFormat.gz;
+
+    auto state = algo.initialize();
+    auto buffer = new ubyte[defaultChunkSize];
+
+    generateSequentialData(len, 1239, 13, 8192)
+        .squizReuse(algo, state, buffer)
+        .writeBinaryFile(dataGz.path);
+
+    algo.reset(state);
+
+    generateSequentialData(len, 1239, 13, 8192)
+        .squizReuse(algo, state, buffer)
+        .writeBinaryFile(dataGz.path);
+
+    algo.end(state);
+}
+
+@("Gz header")
+unittest
+{
+
 }
 
 @("Compress GZ repetitive")
@@ -66,8 +99,8 @@ unittest
 
     auto dataGz = DeleteMe("data", ".gz");
 
-    const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 1000*1000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
+    const len = 1000 * 1000;
 
     testCompressData!({
         SHA1 sha;
@@ -76,9 +109,10 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
-            .compressGz(6, 8192)
+            .deflateGz(6, 8192)
             .writeBinaryFile(dataGz.path);
 
         return sha.finish();
@@ -105,7 +139,7 @@ unittest
 
     // windows do not have bzip2
     // deactivating for now
-    version(Posix)
+    version (Posix)
         testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
 
@@ -126,6 +160,7 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
             .compressBz2(8192)
@@ -144,8 +179,8 @@ unittest
 
     auto dm = DeleteMe("data", ".bz2");
 
-    const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 1000*1000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
+    const len = 1000 * 1000;
 
     testCompressData!({
         SHA1 sha;
@@ -154,6 +189,7 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
             .compressBz2(8192)
@@ -162,7 +198,6 @@ unittest
         return sha.finish();
     })(len, dm.path, "compressBz2", "repetitive", "bzip2");
 }
-
 
 @("Compress XZ tar")
 unittest
@@ -186,7 +221,7 @@ unittest
 
     // windows do not have xz
     // deactivating for now
-    version(Posix)
+    version (Posix)
         testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
 }
 
@@ -207,6 +242,7 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
             .compressXz(6, 8192)
@@ -224,8 +260,8 @@ unittest
 
     auto dataXz = DeleteMe("data", ".xz");
 
-    const phrase = cast(const(ubyte)[])"Some very repetitive phrase.";
-    const len = 1000*1000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
+    const len = 1000 * 1000;
 
     testCompressData!({
         SHA1 sha;
@@ -234,6 +270,7 @@ unittest
             sha.put(bytes);
             return true;
         }
+
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
             .compressXz(6, 8192)
@@ -246,12 +283,12 @@ unittest
 private void testCompressData(alias fun)(size_t len, string filename, string algo, string datatype, string utility)
 {
     import std.algorithm : canFind;
+
     // import std.datetime.stopwatch;
     import std.digest : toHexString, LetterCase;
     import std.file : getSize;
     import std.process : executeShell, escapeShellFileName;
     import std.stdio : File, writefln;
-
 
     // StopWatch sw;
     // sw.start();
@@ -263,7 +300,7 @@ private void testCompressData(alias fun)(size_t len, string filename, string alg
 
     // windows do not have bzip2 and xz
     // deactivating for now
-    version(Windows)
+    version (Windows)
         const test = utility != "bzip2" && utility != "xz";
     else
         const test = true;
