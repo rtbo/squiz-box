@@ -1,11 +1,30 @@
-/// Compression, decompression algorithms
+/// Compression, decompression algorithms.
 ///
 /// Each compression or decompression algorithm is represented by a struct
 /// that contains parameters for compression/decompression.
+/// Besides the parameters they carry, algorithms have no state. Each
+/// algorithm instance can be used for an unlimited number of parallel jobs.
 ///
+/// The algorithms create a stream, which carry the state and allocated
+/// resources of the ongoing compression.
+///
+/// The compression/decompression jobs are run by the `squiz` function,
+/// or one of the related helpers built upon it
+/// (e.g. deflate, deflateGz, inflate, ...).
+///
+/// Compression often wraps the compressed data with header and trailer
+/// that give the decompression algorithm useful information, especially
+/// to check the integrity of the data after decompression.
+/// This is called the format.
+/// Compressions algorithms may offer different formats, and sometimes
+/// the possibility to not wrap the data at all (raw format), in which
+/// case integrity check is not performed. This usually used when
+/// an external integrity check is done, for example when archiving
+/// compressed stream in Zip or 7z archives.
 module squiz_box.squiz;
 
 import squiz_box.c.zlib;
+import squiz_box.c.bzip2;
 import squiz_box.core;
 import squiz_box.priv;
 
@@ -13,6 +32,15 @@ import std.datetime.systime;
 import std.exception;
 import std.range;
 import std.typecons;
+
+/// Exception thrown when inconsistent data is given to
+/// a decompression algorithm.
+/// I.e. the data was not compressed with the corresponding algorithm
+/// or the wrapping format is not the one expected.
+class DataException : Exception
+{
+    mixin basicExceptionCtors!();
+}
 
 /// Check whether a type is a proper squiz algorithm.
 template isSquizAlgo(A)
@@ -367,11 +395,11 @@ struct GzHeader
 
     private enum bufSize = 256;
 
-    private string strz(const(byte)* ptr)
+    private string fromLatin1z(const(byte)* ptr)
     {
-        // ptr points to a buffer of bufSize characters
-        // end of string is a null charactor or end of buffer
-        // encoding is latin 1
+        // ptr points to a buffer of bufSize characters.
+        // End of string is a null character or end of buffer.
+        // Encoding is latin 1.
         import std.encoding : Latin1Char, transcode;
 
         const len = strnlen(ptr, bufSize);
@@ -563,14 +591,12 @@ struct Deflate
         const flush = inputEmpty ? Z_FINISH : Z_NO_FLUSH;
         const res = squiz_box.c.zlib.deflate(&state.strm, flush);
 
-        if (res == Z_STREAM_END)
-            return Yes.streamEnded;
-
         enforce(
-            res == Z_OK,
+            res == Z_OK || res == Z_STREAM_END,
             "Zlib deflate failed with code: " ~ zResultToString(res)
         );
-        return No.streamEnded;
+
+        return cast(Flag!"streamEnded") (res == Z_STREAM_END);
     }
 
     void reset(State state)
@@ -700,6 +726,14 @@ struct Inflate
     package Flag!"streamEnded" process(State state, Flag!"inputEmpty" /+ inputEmpty +/ )
     {
         const res = squiz_box.c.zlib.inflate(&state.strm, Z_NO_FLUSH);
+        //
+        if (res == Z_DATA_ERROR)
+            throw new DataException("Improper data given to deflate");
+
+        enforce(
+            res == Z_OK || res == Z_STREAM_END,
+            "Zlib inflate failed with code: " ~ zResultToString(res)
+        );
 
         auto gzh = state.gzh;
         if (gzh && !gzh.dgCalled && gzh.gzh.done)
@@ -708,14 +742,7 @@ struct Inflate
             gzh.dgCalled = true;
         }
 
-        if (res == Z_STREAM_END)
-            return Yes.streamEnded;
-
-        enforce(
-            res == Z_OK,
-            "Zlib inflate failed with code: " ~ zResultToString(res)
-        );
-        return No.streamEnded;
+        return cast(Flag!"streamEnded") (res == Z_STREAM_END);
     }
 
     package void reset(State state)
