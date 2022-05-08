@@ -18,7 +18,7 @@
 /// This is called the format.
 /// Compressions algorithms may offer different formats, and sometimes
 /// the possibility to not wrap the data at all (raw format), in which
-/// case integrity check is not performed. This usually used when
+/// case integrity check is not performed. This is usually used when
 /// an external integrity check is done, for example when archiving
 /// compressed stream in Zip or 7z archives.
 module squiz_box.squiz;
@@ -46,39 +46,33 @@ class DataException : Exception
 template isSquizAlgo(A)
 {
     enum isSquizAlgo = is(typeof((A algo) {
-                auto state = algo.initialize();
-                Flag!"streamEnded" ended = algo.process(state, Yes.inputEmpty);
-                algo.reset(state);
-                algo.end(state);
-                static assert(is(typeof(state) : SquizState));
-                static assert(is(typeof(state) : SquizStream));
+                auto stream = algo.initialize();
+                Flag!"streamEnded" ended = algo.process(stream, Yes.inputEmpty);
+                algo.reset(stream);
+                algo.end(stream);
+                static assert(is(typeof(stream) : SquizStream));
             }));
 }
 
-/// Get the type of a SquizState for the Squiz algorithm
-template StateType(A) if (isSquizAlgo!A)
+/// Get the type of a SquizStream for the Squiz algorithm
+template StreamType(A) if (isSquizAlgo!A)
 {
     import std.traits : ReturnType;
 
-    alias StateType = ReturnType!(A.initialize);
+    alias StreamType = ReturnType!(A.initialize);
 }
 
 /// A squiz algorithm whom type is erased behind an interface.
 /// This helps to choose algorithm at run time.
 interface SquizAlgo
 {
-    SquizState initialize();
-    Flag!"streamEnded" process(SquizState, Flag!"inputEmpty");
-    void reset(SquizState state);
-    void end(SquizState state);
+    SquizStream initialize();
+    Flag!"streamEnded" process(SquizStream, Flag!"inputEmpty");
+    void reset(SquizStream stream);
+    void end(SquizStream stream);
 }
 
 static assert(isSquizAlgo!SquizAlgo);
-
-/// Runtime state for SquizAlgo
-interface SquizState : SquizStream
-{
-}
 
 /// Get a runtime type for the provided algorithm
 SquizAlgo squizAlgo(A)(A algo)
@@ -109,7 +103,7 @@ unittest
 
 private class CSquizAlgo(A) : SquizAlgo
 {
-    alias State = StateType!A;
+    alias Stream = StreamType!A;
 
     A algo;
 
@@ -118,32 +112,60 @@ private class CSquizAlgo(A) : SquizAlgo
         this.algo = algo;
     }
 
-    private State checkState(SquizState state)
+    private Stream checkStream(SquizStream stream)
     {
-        auto s = cast(State)state;
-        assert(s, "provided state is not produced by this algorithm");
+        auto s = cast(Stream)stream;
+        assert(s, "provided stream is not produced by this algorithm");
         return s;
     }
 
-    SquizState initialize()
+    SquizStream initialize()
     {
         return algo.initialize();
     }
 
-    Flag!"streamEnded" process(SquizState state, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(SquizStream stream, Flag!"inputEmpty" inputEmpty)
     {
-        return algo.process(checkState(state), inputEmpty);
+        return algo.process(checkStream(stream), inputEmpty);
     }
 
-    void reset(SquizState state)
+    void reset(SquizStream stream)
     {
-        return algo.reset(checkState(state));
+        return algo.reset(checkStream(stream));
     }
 
-    void end(SquizState state)
+    void end(SquizStream stream)
     {
-        return algo.end(checkState(state));
+        return algo.end(checkStream(stream));
     }
+}
+
+/// A state carrying, processing stream for squiz algorithms.
+/// The stream does not carry any buffer, only slices to external buffer.
+/// One may normally not use this directly as everything is handled
+/// by the `squiz` function.
+interface SquizStream
+{
+    /// Input data for the algorithm
+    /// The slice is reduced by its begining as the processing moves on.
+    /// Must be refilled when empty before calling the algorithm `process` method.
+    @property const(ubyte)[] input() const;
+    /// Ditto
+    @property void input(const(ubyte)[] inp);
+
+    /// How many bytes read since the start of the stream processing.
+    @property size_t totalInput() const;
+
+    /// Output buffer for the algorithm to write to.
+    /// This is NOT the data ready after process, but where the
+    /// algorithm must write next.
+    /// after a call to process, the slice is reduced by its beginning,
+    /// and the data written is therefore the one before the slice.
+    @property inout(ubyte)[] output() inout;
+    @property void output(ubyte[] outp);
+
+    /// How many bytes written since the start of the stream processing.
+    @property size_t totalOutput() const;
 }
 
 private template isZlibLikeStream(S)
@@ -154,18 +176,6 @@ private template isZlibLikeStream(S)
                 stream.next_out = cast(ubyte*) null;
                 stream.avail_out = 0;
             }));
-}
-
-/// A processing stream for squiz algorithms
-interface SquizStream
-{
-    @property const(ubyte)[] input() const;
-    @property void input(const(ubyte)[] inp);
-    @property size_t totalInput() const;
-
-    @property inout(ubyte)[] output() inout;
-    @property void output(ubyte[] outp);
-    @property size_t totalOutput() const;
 }
 
 private mixin template StreamImpl(S)
@@ -217,29 +227,30 @@ auto squiz(I, A)(I input, A algo, size_t chunkSize = defaultChunkSize)
 auto squiz(I, A)(I input, A algo, ubyte[] chunkBuffer)
         if (isByteRange!I && isSquizAlgo!A)
 {
-    auto state = algo.initialize();
-    return Squiz!(I, A, Yes.endState)(input, algo, state, chunkBuffer);
+    auto stream = algo.initialize();
+    return Squiz!(I, A, Yes.endStream)(input, algo, stream, chunkBuffer);
 }
 
 /// Returns an InputRange containing the input data processed through the supplied algorithm.
-/// To the difference of `squiz`, `squizReuse` will not manage the state of the algorithm,
+/// To the difference of `squiz`, `squizReuse` will not manage the state (aka stream) of the algorithm,
 /// which allows to reuse it (and its allocated resources) for several jobs.
-/// The state must be either freshly initialized or freshly reset before being passed
+/// squizReuse will drive the algorithm and move the stream forward until processing is over.
+/// The stream must be either freshly initialized or freshly reset before being passed
 /// to this function.
-auto squizReuse(I, A, S)(I input, A algo, S state, ubyte[] chunkBuffer)
+auto squizReuse(I, A, S)(I input, A algo, S stream, ubyte[] chunkBuffer)
         if (isByteRange!I && isSquizAlgo!A)
 {
-    static assert(is(StateType!A == S), S.strinof ~ " is not the state produced by " ~ A.stringof);
-    return Squiz!(I, A, No.endState)(input, algo, state, chunkBuffer);
+    static assert(is(StreamType!A == S), S.strinof ~ " is not the stream produced by " ~ A.stringof);
+    return Squiz!(I, A, No.endStream)(input, algo, stream, chunkBuffer);
 }
 
 // Common transformation range for all compression/decompression functions.
 // I is a byte input range
 // A is a squiz algorithm
-// if Yes.end, the state is ended when data is done processing
-private struct Squiz(I, A, Flag!"endState" endState)
+// if Yes.end, the stream is ended when data is done processing
+private struct Squiz(I, A, Flag!"endStream" endStream)
 {
-    private alias State = StateType!A;
+    private alias Stream = StreamType!A;
 
     // Byte input range (by chunks)
     private I input;
@@ -247,8 +258,8 @@ private struct Squiz(I, A, Flag!"endState" endState)
     // The algorithm
     private A algo;
 
-    // Processed stream state
-    private State state;
+    // Processed stream stream
+    private Stream stream;
 
     // Buffer used to store the front chunk
     private ubyte[] chunkBuffer;
@@ -258,11 +269,11 @@ private struct Squiz(I, A, Flag!"endState" endState)
     /// Whether the end of stream was reported by the Policy
     private bool ended;
 
-    private this(I input, A algo, State state, ubyte[] chunkBuffer)
+    private this(I input, A algo, Stream stream, ubyte[] chunkBuffer)
     {
         this.input = input;
         this.algo = algo;
-        this.state = state;
+        this.stream = stream;
         this.chunkBuffer = chunkBuffer;
         prime();
     }
@@ -288,23 +299,23 @@ private struct Squiz(I, A, Flag!"endState" endState)
     {
         while (chunk.length < chunkBuffer.length)
         {
-            if (state.input.length == 0 && !input.empty)
-                state.input = input.front;
+            if (stream.input.length == 0 && !input.empty)
+                stream.input = input.front;
 
-            state.output = chunkBuffer[chunk.length .. $];
+            stream.output = chunkBuffer[chunk.length .. $];
 
-            const streamEnded = algo.process(state, cast(Flag!"inputEmpty") input.empty);
+            const streamEnded = algo.process(stream, cast(Flag!"inputEmpty") input.empty);
 
-            chunk = chunkBuffer[0 .. $ - state.output.length];
+            chunk = chunkBuffer[0 .. $ - stream.output.length];
 
             // popFront must be called at the end because it invalidates inChunk
-            if (state.input.length == 0 && !input.empty)
+            if (stream.input.length == 0 && !input.empty)
                 input.popFront();
 
             if (streamEnded)
             {
-                static if (endState)
-                    algo.end(state);
+                static if (endStream)
+                    algo.end(stream);
                 ended = true;
                 break;
             }
@@ -355,7 +366,8 @@ unittest
 
 /// Header data for the Gzip format.
 /// Gzip includes metadata about the file which is compressed.
-/// These can be specified here when compressing from a stream.
+/// These can be specified here when compressing from a stream
+/// rather than directly from a file.
 struct GzHeader
 {
     /// operating system encoded in the Gz header
@@ -458,7 +470,7 @@ Flag!"text" isText(const(ubyte)[] data)
     );
 }
 
-class ZlibState : SquizState
+class ZlibStream : SquizStream
 {
     mixin StreamImpl!z_stream;
 
@@ -467,7 +479,6 @@ class ZlibState : SquizState
         strm.zalloc = &(gcAlloc!uint);
         strm.zfree = &gcFree;
     }
-
 }
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
@@ -518,7 +529,7 @@ auto deflateRaw(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
 struct Deflate
 {
     static assert(isSquizAlgo!Deflate);
-    static assert(is(StateType!Deflate == State));
+    static assert(is(StreamType!Deflate == Stream));
 
     /// Which format to use for the deflated stream.
     /// In case ZlibFormat.gz, the gzHeader field will be used if supplied,
@@ -541,11 +552,11 @@ struct Deflate
     /// ditto
     int strategy = Z_DEFAULT_STRATEGY;
 
-    static final class State : ZlibState
+    static final class Stream : ZlibStream
     {
     }
 
-    State initialize()
+    Stream initialize()
     {
         assert(
             9 <= windowBits && windowBits <= 15,
@@ -566,10 +577,10 @@ struct Deflate
             break;
         }
 
-        auto state = new State();
+        auto stream = new Stream();
 
         const res = deflateInit2(
-            &state.strm, level, Z_DEFLATED,
+            &stream.strm, level, Z_DEFLATED,
             wb, memLevel, cast(int) strategy,
         );
         enforce(
@@ -580,16 +591,16 @@ struct Deflate
         if (format == ZlibFormat.gz && !gzHeader.isNull)
         {
             auto head = gzHeader.get.toZlib();
-            deflateSetHeader(&state.strm, head);
+            deflateSetHeader(&stream.strm, head);
         }
 
-        return state;
+        return stream;
     }
 
-    Flag!"streamEnded" process(State state, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
     {
         const flush = inputEmpty ? Z_FINISH : Z_NO_FLUSH;
-        const res = squiz_box.c.zlib.deflate(&state.strm, flush);
+        const res = squiz_box.c.zlib.deflate(&stream.strm, flush);
 
         enforce(
             res == Z_OK || res == Z_STREAM_END,
@@ -599,14 +610,14 @@ struct Deflate
         return cast(Flag!"streamEnded") (res == Z_STREAM_END);
     }
 
-    void reset(State state)
+    void reset(Stream stream)
     {
-        deflateReset(&state.strm);
+        deflateReset(&stream.strm);
     }
 
-    void end(State state)
+    void end(Stream stream)
     {
-        deflateEnd(&state.strm);
+        deflateEnd(&stream.strm);
     }
 }
 
@@ -677,12 +688,12 @@ struct Inflate
         }
     }
 
-    static final class State : ZlibState
+    static final class Stream : ZlibStream
     {
         Gzh gzh;
     }
 
-    State initialize()
+    Stream initialize()
     {
         assert(
             (windowBits == 0 && format == ZlibFormat.zlib) ||
@@ -705,9 +716,9 @@ struct Inflate
             break;
         }
 
-        auto state = new State();
+        auto stream = new Stream();
 
-        const res = inflateInit2(&state.strm, wb);
+        const res = inflateInit2(&stream.strm, wb);
 
         enforce(
             res == Z_OK,
@@ -716,16 +727,16 @@ struct Inflate
 
         if (gzHeaderDg)
         {
-            state.gzh = new Gzh(gzHeaderDg);
-            inflateGetHeader(&state.strm, &state.gzh.gzh);
+            stream.gzh = new Gzh(gzHeaderDg);
+            inflateGetHeader(&stream.strm, &stream.gzh.gzh);
         }
 
-        return state;
+        return stream;
     }
 
-    package Flag!"streamEnded" process(State state, Flag!"inputEmpty" /+ inputEmpty +/ )
+    package Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" /+ inputEmpty +/ )
     {
-        const res = squiz_box.c.zlib.inflate(&state.strm, Z_NO_FLUSH);
+        const res = squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH);
         //
         if (res == Z_DATA_ERROR)
             throw new DataException("Improper data given to deflate");
@@ -735,7 +746,7 @@ struct Inflate
             "Zlib inflate failed with code: " ~ zResultToString(res)
         );
 
-        auto gzh = state.gzh;
+        auto gzh = stream.gzh;
         if (gzh && !gzh.dgCalled && gzh.gzh.done)
         {
             gzh.dg(GzHeader(&gzh.gzh));
@@ -745,14 +756,14 @@ struct Inflate
         return cast(Flag!"streamEnded") (res == Z_STREAM_END);
     }
 
-    package void reset(State state)
+    package void reset(Stream stream)
     {
-        inflateReset(&state.strm);
+        inflateReset(&stream.strm);
     }
 
-    package void end(State state)
+    package void end(Stream stream)
     {
-        inflateEnd(&state.strm);
+        inflateEnd(&stream.strm);
     }
 }
 
