@@ -396,6 +396,8 @@ unittest
 /// rather than directly from a file.
 struct GzHeader
 {
+    import core.stdc.config : c_ulong;
+
     /// operating system encoded in the Gz header
     /// Not all possible values are listed here, only
     /// the most useful ones
@@ -422,7 +424,7 @@ struct GzHeader
 
     // storing in unix format to avoid
     // negative numbers with SysTime.init
-    private long _mtime;
+    private c_ulong _mtime;
 
     /// Modification time
     @property SysTime mtime() const
