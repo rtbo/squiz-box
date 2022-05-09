@@ -1,4 +1,4 @@
-/// Compression, decompression algorithms.
+/// Compression and decompression streaming algorithms.
 ///
 /// Each compression or decompression algorithm is represented by a struct
 /// that contains parameters for compression/decompression.
@@ -9,8 +9,14 @@
 /// resources of the ongoing compression.
 ///
 /// The compression/decompression jobs are run by the `squiz` function,
-/// or one of the related helpers built upon it
-/// (e.g. deflate, deflateGz, inflate, ...).
+/// or one of the related helpers built upon it (e.g. deflate, deflateGz, inflate, ...).
+///
+/// `squiz` and related functions take and InputRange of ubyte[] and return an InputRange of ubyte[].
+/// This allows streaming in the most natural way for a D program and provide
+/// the greatest versatility.
+/// It is possible to read the data from any source (file, network, memory),
+/// process the data, and write to any kind of destination.
+/// This also allows to process gigabytes of data with little memory usage.
 ///
 /// Compression often wraps the compressed data with header and trailer
 /// that give the decompression algorithm useful information, especially
@@ -23,8 +29,9 @@
 /// compressed stream in Zip or 7z archives.
 module squiz_box.squiz;
 
-import squiz_box.c.zlib;
 import squiz_box.c.bzip2;
+import squiz_box.c.lzma;
+import squiz_box.c.zlib;
 import squiz_box.core;
 import squiz_box.priv;
 
@@ -197,7 +204,7 @@ private template isZlibLikeStream(S)
 
 private mixin template StreamImpl(S) if (isZlibLikeStream!S)
 {
-    S strm;
+    private S strm;
 
     @property const(ubyte)[] input() const
     {
@@ -506,7 +513,7 @@ Flag!"text" isText(const(ubyte)[] data)
     );
 }
 
-private class ZlibStream : SquizStream
+class ZlibStream : SquizStream
 {
     mixin StreamImpl!z_stream;
     mixin StreamTotalInOutImpl!();
@@ -821,7 +828,7 @@ unittest
     auto def = Deflate.init;
     auto inf = Inflate.init;
 
-    const len = 10_000;
+    const len = 100_000;
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
@@ -834,9 +841,9 @@ unittest
     assert(squized.length < input.length);
     assert(output == input);
 
-    // for such repetitive data, ratio is around 0.8%
+    // for such long and repetitive data, ratio is around 0.3%
     const ratio = cast(double) squized.length / cast(double) input.length;
-    assert(ratio < 0.01);
+    assert(ratio < 0.004);
 }
 
 ///
@@ -963,14 +970,14 @@ auto compressBzip2(I)(I input, size_t chunkSize = defaultChunkSize)
     return squiz(input, CompressBzip2.init, chunkSize);
 }
 
-private final class Bz2Stream : SquizStream
+final class Bz2Stream : SquizStream
 {
     mixin StreamImpl!(bz_stream);
 
     @property size_t totalInput() const
     {
         ulong hi = strm.total_in_hi32;
-        return cast(size_t) (
+        return cast(size_t)(
             (hi << 32) | strm.total_in_lo32
         );
     }
@@ -978,7 +985,7 @@ private final class Bz2Stream : SquizStream
     @property size_t totalOutput() const
     {
         ulong hi = strm.total_out_hi32;
-        return cast(size_t) (
+        return cast(size_t)(
             (hi << 32) | strm.total_out_lo32
         );
     }
@@ -998,17 +1005,12 @@ private final class Bz2Stream : SquizStream
 /// If streaming latenty is an important factor, deflate/inflate
 /// should be the favorite algorithm.
 ///
-/// It should be known as well that Bzip2 tend to struggle to compress
-/// repetitive data, which are better handled by Zlib.
-/// This being said, for most input Bzip2 will provide 10% to 15% better
-/// compression than Zlib.
-///
 /// This algorithm does not support resource reuse, so calling reset
 /// is equivalent to a call to end followed by initialize.
 /// (but the same instance of stream is kept).
 struct CompressBzip2
 {
-    static assert (isSquizAlgo!CompressBzip2);
+    static assert(isSquizAlgo!CompressBzip2);
 
     /// Advanced Bzip2 parameters
     /// See Bzip2 documentation
@@ -1089,7 +1091,7 @@ auto decompressBzip2(I)(I input, size_t chunkSize = defaultChunkSize)
 /// (but the same instance of stream is kept).
 struct DecompressBzip2
 {
-    static assert (isSquizAlgo!DecompressBzip2);
+    static assert(isSquizAlgo!DecompressBzip2);
 
     /// Advanced Bzip2 parameters
     /// See Bzip2 documentation
@@ -1159,7 +1161,7 @@ unittest
     import test.util;
     import std.array : join;
 
-    const len = 10_000;
+    const len = 100_000;
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
@@ -1176,10 +1178,9 @@ unittest
     assert(squized.length < input.length);
     assert(output == input);
 
-    // for such repetitive data, ratio is around 1.13%
-    // also generally better than zlib, bzip2 struggles a lot for repetitive data
+    // for such long and repetitive data, ratio is around 0.12%
     const ratio = cast(double) squized.length / cast(double) input.length;
-    assert(ratio < 0.015);
+    assert(ratio < 0.002);
 }
 
 private string bzActionToString(int action)
@@ -1232,4 +1233,465 @@ private string bzResultToString(int res)
     default:
         return "(Unknown result)";
     }
+}
+
+final class LzmaStream : SquizStream
+{
+    mixin StreamImpl!(lzma_stream);
+    mixin StreamTotalInOutImpl!();
+
+    private lzma_allocator alloc;
+    private lzma_options_delta optsDelta;
+    private lzma_options_lzma optsLzma;
+    private lzma_filter[] filterChain;
+
+    this()
+    {
+        alloc.alloc = &(gcAlloc!size_t);
+        alloc.free = &gcFree;
+        strm.allocator = &alloc;
+    }
+
+    private lzma_filter[] buildFilterChain(LzmaFilter filter, uint preset, uint deltaDist)
+    {
+        lzma_filter[] res;
+        if (filter & LzmaFilter.delta)
+        {
+            optsDelta.dist = deltaDist;
+            res ~= lzma_filter(LZMA_FILTER_DELTA, cast(void*)&optsDelta);
+        }
+        if (filter & LzmaFilter.bcjX86)
+            res ~= lzma_filter(LZMA_FILTER_X86, null);
+        if (filter & LzmaFilter.bcjPowerPc)
+            res ~= lzma_filter(LZMA_FILTER_POWERPC, null);
+        if (filter & LzmaFilter.bcjIa64)
+            res ~= lzma_filter(LZMA_FILTER_IA64, null);
+        if (filter & LzmaFilter.bcjArm)
+            res ~= lzma_filter(LZMA_FILTER_ARM, null);
+        if (filter & LzmaFilter.bcjArmThumb)
+            res ~= lzma_filter(LZMA_FILTER_ARMTHUMB, null);
+        if (filter & LzmaFilter.bcjSparc)
+            res ~= lzma_filter(LZMA_FILTER_SPARC, null);
+
+        enforce(res.length <= 3, "Too many filters supplied");
+
+        lzma_lzma_preset(&optsLzma, preset);
+        res ~= lzma_filter(LZMA_FILTER_LZMA2, cast(void*)&optsLzma);
+
+        res ~= lzma_filter(LZMA_VLI_UNKNOWN, null); // end marker
+
+        filterChain = res;
+        return res;
+    }
+
+}
+
+/// Header/trailer format for Lzma compression
+enum LzmaFormat
+{
+    /// Lzma with Xz format, suitable to write *.xz files
+    xz,
+    /// Raw Lzma compression, without header/trailer.
+    /// Use this to include compressed LZMA data in
+    /// a container defined externally (e.g. this is used
+    /// for the *.7z archives)
+    raw,
+}
+
+/// Filters to use with the LZMA compression.
+///
+/// Up to 3 filters can be used from this list.
+/// These filters transform the input to increase
+/// redundancy of the data supplied to the LZMA compression.
+enum LzmaFilter
+{
+    /// No additional filter
+    none = 0,
+
+    /// Delta filter, which store differences between bytes
+    /// to produce more repetitive data in some circumstances.
+    /// Works with `deltaDist` parameter of `CompressLzma`.
+    delta = 1,
+
+    /// BCJ (Branch/Call/Jump) filters aim optimize machine code
+    /// compression by converting relative branches, calls and jumps
+    /// to absolute addresses. This increases redundancy and can be
+    /// exploited by the LZMA compression.
+    ///
+    /// BCJ filters are available for a set of CPU architectures.
+    /// Use one (or two) of them when compressing compiled binaries.
+    bcjX86 = 2,
+    /// ditto
+    bcjPowerPc = 4,
+    /// ditto
+    bcjIa64 = 8,
+    /// ditto
+    bcjArm = 16,
+    /// ditto
+    bcjArmThumb = 32,
+    /// ditto
+    bcjSparc = 64,
+}
+
+/// Integrity check to include in the compressed data
+/// (only for the Xz format)
+/// Default for xz is CRC-64.
+enum LzmaCheck
+{
+    /// No integrity check included
+    none,
+    /// CRC-32 integrity check
+    crc32,
+    /// CRC-64 integrity check
+    crc64,
+    /// SHA-256 integrity check
+    sha256,
+}
+
+private lzma_check toLzma(LzmaCheck check)
+{
+    final switch (check)
+    {
+    case LzmaCheck.none:
+        return lzma_check.NONE;
+    case LzmaCheck.crc32:
+        return lzma_check.CRC32;
+    case LzmaCheck.crc64:
+        return lzma_check.CRC64;
+    case LzmaCheck.sha256:
+        return lzma_check.SHA256;
+    }
+}
+
+auto compressXz(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, CompressLzma.init, chunkSize);
+}
+
+auto compressLzmaRaw(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    CompressLzma algo;
+    algo.format = LzmaFormat.raw;
+    return squiz(input, algo, chunkSize);
+}
+
+struct CompressLzma
+{
+    import std.conv : to;
+
+    static assert(isSquizAlgo!CompressLzma);
+
+    /// The format of the compressed stream
+    LzmaFormat format;
+
+    /// The integrity check to include in compressed stream.
+    /// Only used with XZ format.
+    LzmaCheck check = LzmaCheck.crc64;
+
+    /// The compression preset between 0 (fast) to 9 (higher compression).
+    /// The default is 6.
+    uint preset = 6;
+
+    /// Makes the encoding significantly slower for marginal compression
+    /// improvement. Only useful if you don't mind about CPU time at all.
+    Flag!"extreme" extreme;
+
+    /// Filters to include in the encoding.
+    /// Maximum three filters can be provided.
+    /// For most input, no filtering is necessary.
+    ///
+    /// The order of the filters in the chain is:
+    ///   - Delta
+    ///   - BCJ
+    ///   - LZMA2 (always enabled)
+    LzmaFilter filters;
+
+    /// Number of bytes between 1 and 256 to use for the Delta filter.
+    /// For example for 16bit PCM stero audio, you should use 4.
+    /// For RGB data 8bit per channel, you should use 3.
+    uint deltaDist;
+
+    alias Stream = LzmaStream;
+
+    private void initStream(Stream stream)
+    {
+        uint pres = preset;
+        if (extreme)
+            pres |= LZMA_PRESET_EXTREME;
+
+        const chain = stream.buildFilterChain(filters, pres, deltaDist);
+
+        // dfmt off
+        const res = format == LzmaFormat.xz ?
+            lzma_stream_encoder(&stream.strm, chain.ptr, check.toLzma()) :
+            lzma_raw_encoder(&stream.strm, chain.ptr);
+        // dfmt on
+
+        enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
+
+    }
+
+    Stream initialize()
+    {
+        auto stream = new LzmaStream;
+        initStream(stream);
+        return stream;
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    {
+        return lzmaCode(stream, inputEmpty);
+    }
+
+    void reset(Stream stream)
+    {
+        // Lzma supports reset out of the box by recalling initialization
+        // function without calling lzma_end.
+
+        initStream(stream);
+    }
+
+    void end(Stream stream)
+    {
+        lzma_end(&stream.strm);
+    }
+}
+
+private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"inputEmpty" inputEmpty)
+{
+    import std.conv : to;
+
+    const action = inputEmpty ? lzma_action.FINISH : lzma_action.RUN;
+    const res = lzma_code(&stream.strm, action);
+
+    enforce(
+        res == lzma_ret.OK || res == lzma_ret.STREAM_END,
+        "LZMA encoding failed with code: " ~ res.to!string
+    );
+
+    return cast(Flag!"streamEnded")(res == lzma_ret.STREAM_END);
+}
+
+auto decompressXz(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, DecompressLzma.init, chunkSize);
+}
+
+auto decompressLzmaRaw(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    DecompressLzma algo;
+    algo.format = LzmaFormat.raw;
+    return squiz(input, algo, chunkSize);
+}
+
+struct DecompressLzma
+{
+    import std.conv : to;
+
+    static assert(isSquizAlgo!DecompressLzma);
+
+    /// The format of the compressed stream
+    LzmaFormat format;
+
+    /// The memory usage limit in bytes.
+    /// by default no limit is enforced
+    size_t memLimit = size_t.max;
+
+    /// Parameters for the raw decompression.
+    /// They are the same than for the compression.
+    /// As there is no header to tell Lzma what filters were used during
+    /// compression, it is the responsibility of the programmer to
+    /// correctly ensure that the same options are used for decompression.
+    /// All these options are ignored when decompressing .xz stream.
+    uint preset = 6;
+    /// ditto
+    Flag!"extreme" extreme;
+    /// ditto
+    LzmaFilter filters;
+    /// ditto
+    uint deltaDist;
+
+    alias Stream = LzmaStream;
+
+    /// convenience constructor to copy parameters of the compression
+    /// for the decompression. Especially useful for the raw decompression,
+    /// to ensure that the parameters fit the ones used for compression.
+    this(CompressLzma compress)
+    {
+        format = compress.format;
+        preset = compress.preset;
+        extreme = compress.extreme;
+        filters = compress.filters;
+        deltaDist = compress.deltaDist;
+    }
+
+    private void initStream(Stream stream)
+    {
+        lzma_ret res;
+        if (format == LzmaFormat.xz)
+        {
+            ulong memlim = memLimit;
+            if (memLimit == size_t.max)
+                memlim = ulong.max;
+
+            res = lzma_stream_decoder(&stream.strm, memlim, 0);
+        }
+        else if (format == LzmaFormat.raw)
+        {
+            uint pres = preset;
+            if (extreme)
+                pres |= LZMA_PRESET_EXTREME;
+
+            const chain = stream.buildFilterChain(filters, pres, deltaDist);
+
+            res = lzma_raw_decoder(&stream.strm, chain.ptr);
+        }
+            enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    {
+        return lzmaCode(stream, inputEmpty);
+    }
+
+    Stream initialize()
+    {
+        auto stream = new LzmaStream;
+        initStream(stream);
+        return stream;
+    }
+
+    void reset(Stream stream)
+    {
+        // Lzma supports reset out of the box by recalling initialization
+        // function without calling lzma_end.
+
+        initStream(stream);
+    }
+
+    void end(Stream stream)
+    {
+        lzma_end(&stream.strm);
+    }
+}
+
+///
+@("Compress / Decompress XZ")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    // deflating
+    const squized = [input]
+        .compressXz()
+        .join();
+
+    // re-inflating
+    const output = [squized]
+        .decompressXz()
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such long and repetitive data, ratio is around 0.2%
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.003);
+}
+
+///
+@("Compress / Decompress XZ with filter")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const input = generateSequentialData(len, 1245, 27).join();
+
+    const reference = [input]
+        .compressXz()
+        .join();
+
+    CompressLzma comp;
+    comp.filters |= LzmaFilter.delta;
+    comp.deltaDist = 8; // sequential data of 8 byte integers
+
+    const withDelta = [input]
+        .squiz(comp)
+        .join();
+
+    const output = [withDelta]
+        .decompressXz()
+        .join();
+
+    assert(output == input);
+    assert(reference.length > withDelta.length * 20);
+}
+
+///
+@("Compress / Decompress Lzma Raw")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    // deflating
+    const squized = [input]
+        .compressLzmaRaw()
+        .join();
+
+    // re-inflating
+    const output = [squized]
+        .decompressLzmaRaw()
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such repetitive data, ratio is around 1.13%
+    // also generally better than zlib, bzip2 struggles a lot for repetitive data
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.003);
+}
+
+///
+@("Compress / Decompress Lzma Raw with filter")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const input = generateSequentialData(len, 1245, 27).join();
+
+    const reference = [input]
+        .compressLzmaRaw()
+        .join();
+
+    CompressLzma comp;
+    comp.format = LzmaFormat.raw;
+    comp.filters |= LzmaFilter.delta;
+    comp.deltaDist = 8; // sequential data of 8 byte integers
+
+    const withDelta = [input]
+        .squiz(comp)
+        .join();
+
+    const output = [withDelta]
+        // using compression parameters for decompression
+        .squiz(DecompressLzma(comp))
+        .join();
+
+    assert(output == input);
+    assert(reference.length > withDelta.length * 20);
 }
