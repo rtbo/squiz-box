@@ -2,10 +2,8 @@ module test.compress;
 
 import test.archive;
 import test.util;
-import squiz_box.bz2;
 import squiz_box.core;
 import squiz_box.squiz;
-import squiz_box.xz;
 
 import std.typecons;
 
@@ -23,7 +21,7 @@ unittest
     enum bufSize = 8192;
 
     tarF.byChunk(bufSize)
-        .deflateGz(6, bufSize)
+        .deflateGz(bufSize)
         .copy(tarXzF.lockingBinaryWriter);
 
     tarF.close();
@@ -52,7 +50,7 @@ unittest
 
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
-            .deflateGz(6, 8192)
+            .deflateGz(8192)
             .writeBinaryFile(dataGz.path);
 
         return sha.finish();
@@ -112,7 +110,7 @@ unittest
 
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
-            .deflateGz(6, 8192)
+            .deflateGz(8192)
             .writeBinaryFile(dataGz.path);
 
         return sha.finish();
@@ -132,7 +130,7 @@ unittest
     enum bufSize = 8192;
 
     tarF.byChunk(bufSize)
-        .compressBz2(bufSize)
+        .compressBzip2(bufSize)
         .writeBinaryFile(archive.path);
 
     tarF.close();
@@ -163,7 +161,7 @@ unittest
 
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
-            .compressBz2(8192)
+            .compressBzip2(8192)
             .writeBinaryFile(dm.path);
 
         return sha.finish();
@@ -192,7 +190,7 @@ unittest
 
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
-            .compressBz2(8192)
+            .compressBzip2(8192)
             .writeBinaryFile(dm.path);
 
         return sha.finish();
@@ -213,7 +211,7 @@ unittest
     enum bufSize = 8192;
 
     tarF.byChunk(bufSize)
-        .compressXz(6, bufSize)
+        .compressXz(bufSize)
         .copy(tarXzF.lockingBinaryWriter);
 
     tarF.close();
@@ -245,7 +243,7 @@ unittest
 
         generateSequentialData(len, 1239, 13, 8192)
             .filter!sha1
-            .compressXz(6, 8192)
+            .compressXz(8192)
             .writeBinaryFile(dataXz.path);
 
         return sha.finish();
@@ -273,7 +271,7 @@ unittest
 
         generateRepetitiveData(len, phrase, 8192)
             .filter!sha1
-            .compressXz(6, 8192)
+            .compressXz(8192)
             .writeBinaryFile(dataXz.path);
 
         return sha.finish();

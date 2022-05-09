@@ -2,7 +2,7 @@ module squiz_box.zip;
 
 import squiz_box.c.zlib;
 import squiz_box.core;
-import squiz_box.gz;
+import squiz_box.squiz;
 import squiz_box.priv;
 
 import std.exception;
@@ -1246,7 +1246,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
             stream.next_out = outBuffer.ptr + outChunk.length;
             stream.avail_out = cast(typeof(stream.avail_out))(outBuffer.length - outChunk.length);
 
-            const res = inflate(&stream, Z_NO_FLUSH);
+            const res = squiz_box.c.zlib.inflate(&stream, Z_NO_FLUSH);
 
             enforce(res == Z_OK || res == Z_STREAM_END,
                 "Error during Zip inflation: " ~ zResultToString(res)

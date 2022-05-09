@@ -529,12 +529,10 @@ class ZlibStream : SquizStream
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data is wrapped by Zlib header and trailer.
-auto deflate(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+auto deflate(I)(I input, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
-    auto algo = Deflate.init;
-    algo.level = level;
-    return squiz(input, algo, chunkSize);
+    return squiz(input, Deflate.init, chunkSize);
 }
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
@@ -542,34 +540,31 @@ auto deflate(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
 /// Suppliying a header is entirely optional. Zlib produces a default header if not supplied.
 /// The default header has text false, mtime zero, unknown os, and
 /// no name or comment.
-auto deflateGz(I)(I input, GzHeader header, int level = 6, size_t chunkSize = defaultChunkSize)
+auto deflateGz(I)(I input, GzHeader header, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.gz;
-    algo.level = level;
     algo.gzHeader = header;
     return squiz(input, algo, chunkSize);
 }
 
 /// ditto
-auto deflateGz(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.gz;
-    algo.level = level;
     return squiz(input, algo, chunkSize);
 }
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data isn't wrapped by any header or trailer.
-auto deflateRaw(I)(I input, int level = 6, size_t chunkSize = defaultChunkSize)
+auto deflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
         if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.raw;
-    algo.level = level;
     return squiz(input, algo, chunkSize);
 }
 
@@ -680,7 +675,7 @@ auto inflate(I)(I input, size_t chunkSize = defaultChunkSize)
 /// The input data must be deflated with a gz format.
 /// If headerDg is not null, it will be called
 /// as soon as the header is read from the stream.
-auto inflateGz(I)(I input, GzHeaderDg headerDg = null, size_t chunkSize = defaultChunkSize)
+auto inflateGz(I)(I input, GzHeaderDg headerDg, size_t chunkSize = defaultChunkSize)
 {
     auto algo = Inflate.init;
     algo.format = ZlibFormat.gz;
@@ -903,7 +898,7 @@ unittest
 
     // deflating
     const squized = [input]
-        .deflateRaw(6)
+        .deflateRaw()
         .join();
 
     // re-inflating
