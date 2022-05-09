@@ -323,9 +323,8 @@ private struct ZipArchiveCreate(I)
 // deflateBuffer, deflated, inflatedSize and crc are invalidated each time deflateEntry is called
 private class Deflater
 {
-    // The zlib stream, configured to not perform any wrapping or integrity check.
-    // As this is a heap allocated class, no need of pointer
-    z_stream stream;
+    Deflate algo;
+    StreamType!Deflate stream;
 
     // buffer that receive compressed data. Only grows from one entry to the next
     ubyte[] deflateBuffer;
@@ -338,58 +337,40 @@ private class Deflater
 
     this()
     {
-        // stream.zalloc = &(gcAlloc!uint);
-        // stream.zfree = &gcFree;
-
-        const level = 6;
-        const windowBits = 15;
-        const memLevel = 8;
-        const strategy = Z_DEFAULT_STRATEGY;
-
-        const ret = deflateInit2(
-            &stream, level, Z_DEFLATED,
-            -windowBits /* negative to remove zlib wrapper */ ,
-            memLevel,
-            strategy
-        );
-
-        enforce(
-            ret == Z_OK,
-            "Could not initialize Zlib deflate stream: " ~ zResultToString(ret)
-        );
+        algo.format = ZlibFormat.raw;
     }
 
     void end()
     {
-        deflateEnd(&stream);
+        algo.end(stream);
     }
 
     void deflateEntry(ByteRange input)
     {
-        if (deflateBuffer)
+        if (!stream)
         {
-            // the stream was used, we have to reset it
-            deflateReset(&stream);
-            deflated = null;
-            inflatedSize = 0;
+            stream = algo.initialize();
+            // arbitrary initial buffer size
+            deflateBuffer = new ubyte[64 * 1024];
         }
         else
         {
-            // arbitrary initial buffer size
-            deflateBuffer = new ubyte[64 * 1024];
+            // the stream was used, we have to reset it
+            algo.reset(stream);
+            deflated = null;
+            inflatedSize = 0;
         }
 
         calculatedCrc32 = crc32(0, null, 0);
 
-        ByteChunk inChunk;
-
         while (true)
         {
-            if (inChunk.length == 0 && !input.empty)
+            if (stream.input.length == 0 && !input.empty)
             {
-                inChunk = input.front;
-                inflatedSize += inChunk.length;
-                calculatedCrc32 = crc32(calculatedCrc32, inChunk.ptr, cast(uint)(inChunk.length));
+                auto inp = input.front;
+                inflatedSize += inp.length;
+                calculatedCrc32 = crc32(calculatedCrc32, inp.ptr, cast(uint)(inp.length));
+                stream.input = inp;
             }
 
             if (deflated.length == deflateBuffer.length)
@@ -398,29 +379,17 @@ private class Deflater
                 deflated = deflateBuffer[0 .. deflated.length];
             }
 
-            stream.next_in = inChunk.ptr;
-            stream.avail_in = cast(uint) inChunk.length;
-            stream.next_out = deflateBuffer.ptr + deflated.length;
-            stream.avail_out = cast(uint)(deflateBuffer.length - deflated.length);
+            stream.output = deflateBuffer[deflated.length .. $];
 
-            const action = input.empty ? Z_FINISH : Z_NO_FLUSH;
-            const res = deflate(&stream, action);
+            const ended = algo.process(stream, cast(Flag!"inputEmpty")input.empty);
 
-            const processedIn = inChunk.length - stream.avail_in;
-            const deflateEnd = deflateBuffer.length - stream.avail_out;
-            inChunk = inChunk[processedIn .. $];
-            deflated = deflateBuffer[0 .. deflateEnd];
+            deflated = deflateBuffer[0 .. $ - stream.output.length];
 
-            if (inChunk.length == 0 && !input.empty)
+            if (stream.input.length == 0 && !input.empty)
                 input.popFront();
 
-            if (res == Z_STREAM_END)
+            if (ended)
                 break;
-
-            enforce(
-                res == Z_OK,
-                "Zlib deflate failed with code: " ~ zResultToString(res)
-            );
         }
     }
 }
