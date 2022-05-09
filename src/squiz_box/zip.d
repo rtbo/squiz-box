@@ -1093,8 +1093,8 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
     C input;
     ulong currentPos;
     ulong size;
-    ubyte[] outBuffer;
-    ubyte[] outChunk;
+    ubyte[] chunkBuffer;
+    ubyte[] chunk;
     uint calculatedCrc32;
     uint expectedCrc32;
     bool ended;
@@ -1107,7 +1107,7 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
         this.input = input;
         this.currentPos = startPos;
         this.size = size;
-        this.outBuffer = new ubyte[chunkSize];
+        this.chunkBuffer = new ubyte[chunkSize];
         this.expectedCrc32 = expectedCrc32;
 
         this.calculatedCrc32 = crc32(0, null, 0);
@@ -1117,17 +1117,17 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
 
     @property bool empty()
     {
-        return size == 0 && outChunk.length == 0;
+        return size == 0 && chunk.length == 0;
     }
 
     @property ByteChunk front()
     {
-        return outChunk;
+        return chunk;
     }
 
     void popFront()
     {
-        outChunk = null;
+        chunk = null;
         if (!ended)
             prime();
     }
@@ -1143,13 +1143,13 @@ private class StoredByChunk(C) : ZipByChunk if (is(C : Cursor))
                 "Data cursor has moved. Entry is no longer valid."
             );
 
-        const len = min(size, outBuffer.length);
-        outChunk = input.read(outBuffer[0 .. len]);
-        enforce(outChunk.length == len, "Corrupted Zip file: unexpected end of input");
+        const len = min(size, chunkBuffer.length);
+        chunk = input.read(chunkBuffer[0 .. len]);
+        enforce(chunk.length == len, "Corrupted Zip file: unexpected end of input");
         currentPos += len;
         size -= len;
 
-        calculatedCrc32 = crc32(calculatedCrc32, outChunk.ptr, cast(uint) len);
+        calculatedCrc32 = crc32(calculatedCrc32, chunk.ptr, cast(uint) len);
 
         if (size == 0)
         {
@@ -1167,17 +1167,17 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 {
     enum isSearchable = is(C : SearchableCursor);
 
-    z_stream stream;
+    Inflate algo;
+    StreamType!Inflate stream;
     C input;
     ulong currentPos;
     ulong compressedSz;
-    ubyte[] outBuffer;
-    ubyte[] outChunk;
+    ubyte[] chunkBuffer;
+    ubyte[] chunk;
     ubyte[] inBuffer;
-    ubyte[] inChunk;
     uint calculatedCrc32;
     uint expectedCrc32;
-    bool ended;
+    Flag!"streamEnded" ended;
 
     this(C input, ulong startPos, ulong compressedSz, size_t chunkSize, uint expectedCrc32)
     {
@@ -1187,33 +1187,31 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
         this.input = input;
         this.currentPos = startPos;
         this.compressedSz = compressedSz;
-        this.outBuffer = new ubyte[chunkSize];
+        this.chunkBuffer = new ubyte[chunkSize];
         this.inBuffer = new ubyte[defaultChunkSize];
         this.expectedCrc32 = expectedCrc32;
 
         this.calculatedCrc32 = crc32(0, null, 0);
-        const res = inflateInit2(&stream, -15);
-        enforce(
-            res == Z_OK,
-            "Could not initialize Zlib inflate stream: " ~ zResultToString(res)
-        );
+
+        algo.format = ZlibFormat.raw;
+        stream = algo.initialize();
 
         prime();
     }
 
     @property bool empty()
     {
-        return compressedSz == 0 && outChunk.length == 0;
+        return compressedSz == 0 && chunk.length == 0;
     }
 
     @property ByteChunk front()
     {
-        return outChunk;
+        return chunk;
     }
 
     void popFront()
     {
-        outChunk = null;
+        chunk = null;
         if (!ended)
             prime();
     }
@@ -1222,9 +1220,9 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
     {
         import std.algorithm : min;
 
-        while (outChunk.length < outBuffer.length)
+        while (chunk.length < chunkBuffer.length)
         {
-            if (inChunk.length == 0 && compressedSz != 0)
+            if (stream.input.length == 0 && compressedSz != 0)
             {
                 static if (isSearchable)
                     input.seek(currentPos);
@@ -1234,40 +1232,28 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
                     );
 
                 const len = min(compressedSz, inBuffer.length);
-                inChunk = input.read(inBuffer[0 .. len]);
-                enforce(inChunk.length == len, "Corrupted Zip file: unexpected end of input");
+                auto inp = input.read(inBuffer[0 .. len]);
+                enforce(inp.length == len, "Corrupted Zip file: unexpected end of input");
+                stream.input = inp;
                 currentPos += len;
                 compressedSz -= len;
             }
 
-            stream.next_in = inChunk.ptr;
-            stream.avail_in = cast(typeof(stream.avail_in)) inChunk.length;
+            stream.output = chunkBuffer[chunk.length .. $];
 
-            stream.next_out = outBuffer.ptr + outChunk.length;
-            stream.avail_out = cast(typeof(stream.avail_out))(outBuffer.length - outChunk.length);
+            ended = algo.process(stream, cast(Flag!"inputEmpty")input.eoi);
 
-            const res = squiz_box.c.zlib.inflate(&stream, Z_NO_FLUSH);
+            chunk = chunkBuffer[0 .. $ - stream.output.length];
 
-            enforce(res == Z_OK || res == Z_STREAM_END,
-                "Error during Zip inflation: " ~ zResultToString(res)
-            );
+            calculatedCrc32 = crc32(calculatedCrc32, chunk.ptr, cast(uint) chunk.length);
 
-            const readIn = inChunk.length - stream.avail_in;
-            inChunk = inChunk[readIn .. $];
-
-            const outEnd = outBuffer.length - stream.avail_out;
-            outChunk = outBuffer[0 .. outEnd];
-
-            calculatedCrc32 = crc32(calculatedCrc32, outChunk.ptr, cast(uint) outChunk.length);
-
-            if (res == Z_STREAM_END)
+            if (ended)
             {
-                ended = true;
                 enforce(
                     calculatedCrc32 == expectedCrc32,
                     "Corrupted Zip file: Wrong CRC32 checkum"
                 );
-                inflateEnd(&stream);
+                algo.end(stream);
                 break;
             }
         }
