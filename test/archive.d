@@ -1,10 +1,8 @@
 module test.archive;
 
-import squiz_box.bz2;
 import squiz_box.core;
-import squiz_box.gz;
+import squiz_box.squiz;
 import squiz_box.tar;
-import squiz_box.xz;
 import squiz_box.zip;
 
 import test.util;
@@ -237,7 +235,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .decompressGz()
+        .inflateGz()
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 
@@ -256,7 +254,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .decompressBz2()
+        .decompressBzip2()
         .readTarArchive()
         .each!(e => e.extractTo(dm.path));
 

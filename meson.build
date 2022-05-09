@@ -9,12 +9,10 @@ squiz_src = files([
     'src/squiz_box/c/lzma.d',
     'src/squiz_box/c/zlib.d',
 
-    'src/squiz_box/bz2.d',
     'src/squiz_box/core.d',
-    'src/squiz_box/gz.d',
     'src/squiz_box/priv.d',
+    'src/squiz_box/squiz.d',
     'src/squiz_box/tar.d',
-    'src/squiz_box/xz.d',
     'src/squiz_box/zip.d',
 ])
 
