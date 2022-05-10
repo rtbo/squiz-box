@@ -1355,31 +1355,46 @@ final class LzmaStream : SquizStream
         strm.allocator = &alloc;
     }
 
-    private lzma_filter[] buildFilterChain(LzmaFilter filter, uint preset, uint deltaDist)
+    private lzma_filter[] buildFilterChain(LzmaFormat format, LzmaFilter[] filters, uint preset, uint deltaDist)
     {
         lzma_filter[] res;
-        if (filter & LzmaFilter.delta)
+        foreach (f; filters)
         {
-            optsDelta.dist = deltaDist;
-            res ~= lzma_filter(LZMA_FILTER_DELTA, cast(void*)&optsDelta);
+            final switch (f)
+            {
+            case LzmaFilter.delta:
+                optsDelta.dist = deltaDist;
+                res ~= lzma_filter(LZMA_FILTER_DELTA, cast(void*)&optsDelta);
+                break;
+            case LzmaFilter.bcjX86:
+                res ~= lzma_filter(LZMA_FILTER_X86, null);
+                break;
+            case LzmaFilter.bcjPowerPc:
+                res ~= lzma_filter(LZMA_FILTER_POWERPC, null);
+                break;
+            case LzmaFilter.bcjIa64:
+                res ~= lzma_filter(LZMA_FILTER_IA64, null);
+                break;
+            case LzmaFilter.bcjArm:
+                res ~= lzma_filter(LZMA_FILTER_ARM, null);
+                break;
+            case LzmaFilter.bcjArmThumb:
+                res ~= lzma_filter(LZMA_FILTER_ARMTHUMB, null);
+                break;
+            case LzmaFilter.bcjSparc:
+                res ~= lzma_filter(LZMA_FILTER_SPARC, null);
+                break;
+            }
         }
-        if (filter & LzmaFilter.bcjX86)
-            res ~= lzma_filter(LZMA_FILTER_X86, null);
-        if (filter & LzmaFilter.bcjPowerPc)
-            res ~= lzma_filter(LZMA_FILTER_POWERPC, null);
-        if (filter & LzmaFilter.bcjIa64)
-            res ~= lzma_filter(LZMA_FILTER_IA64, null);
-        if (filter & LzmaFilter.bcjArm)
-            res ~= lzma_filter(LZMA_FILTER_ARM, null);
-        if (filter & LzmaFilter.bcjArmThumb)
-            res ~= lzma_filter(LZMA_FILTER_ARMTHUMB, null);
-        if (filter & LzmaFilter.bcjSparc)
-            res ~= lzma_filter(LZMA_FILTER_SPARC, null);
 
         enforce(res.length <= 3, "Too many filters supplied");
 
-        lzma_lzma_preset(&optsLzma, preset);
-        res ~= lzma_filter(LZMA_FILTER_LZMA2, cast(void*)&optsLzma);
+        if (format != LzmaFormat.rawCopy)
+        {
+            lzma_lzma_preset(&optsLzma, preset);
+            const compFilter = format.isLegacy ? LZMA_FILTER_LZMA1 : LZMA_FILTER_LZMA2;
+            res ~= lzma_filter(compFilter, cast(void*)&optsLzma);
+        }
 
         res ~= lzma_filter(LZMA_VLI_UNKNOWN, null); // end marker
 
@@ -1394,11 +1409,32 @@ enum LzmaFormat
 {
     /// Lzma with Xz format, suitable to write *.xz files
     xz,
-    /// Raw Lzma compression, without header/trailer.
+    /// LZMA1 encoding and format, suitable for legacy *.lzma files
+    legacy,
+    /// Raw LZMA2 compression, without header/trailer.
     /// Use this to include compressed LZMA data in
     /// a container defined externally (e.g. this is used
     /// for the *.7z archives)
     raw,
+    /// Raw LZMA1 compression, without header/trailer.
+    /// This one is still found in some *.7z files.
+    rawLegacy,
+    /// Just copy bytes out.
+    /// You may use this in combination with a filter to observe its
+    /// effect, but has otherwise no use.
+    rawCopy,
+}
+
+/// Whether this is a legacy format
+bool isLegacy(LzmaFormat format)
+{
+    return format == LzmaFormat.legacy || format == LzmaFormat.rawLegacy;
+}
+
+/// Whether this is a raw format
+bool isRaw(LzmaFormat format)
+{
+    return cast(int) format >= cast(int) LzmaFormat.raw;
 }
 
 /// Filters to use with the LZMA compression.
@@ -1408,13 +1444,10 @@ enum LzmaFormat
 /// redundancy of the data supplied to the LZMA compression.
 enum LzmaFilter
 {
-    /// No additional filter
-    none = 0,
-
     /// Delta filter, which store differences between bytes
     /// to produce more repetitive data in some circumstances.
     /// Works with `deltaDist` parameter of `CompressLzma`.
-    delta = 1,
+    delta,
 
     /// BCJ (Branch/Call/Jump) filters aim optimize machine code
     /// compression by converting relative branches, calls and jumps
@@ -1423,17 +1456,17 @@ enum LzmaFilter
     ///
     /// BCJ filters are available for a set of CPU architectures.
     /// Use one (or two) of them when compressing compiled binaries.
-    bcjX86 = 2,
+    bcjX86,
     /// ditto
-    bcjPowerPc = 4,
+    bcjPowerPc,
     /// ditto
-    bcjIa64 = 8,
+    bcjIa64,
     /// ditto
-    bcjArm = 16,
+    bcjArm,
     /// ditto
-    bcjArmThumb = 32,
+    bcjArmThumb,
     /// ditto
-    bcjSparc = 64,
+    bcjSparc,
 }
 
 /// Integrity check to include in the compressed data
@@ -1502,12 +1535,7 @@ struct CompressLzma
     /// Filters to include in the encoding.
     /// Maximum three filters can be provided.
     /// For most input, no filtering is necessary.
-    ///
-    /// The order of the filters in the chain is:
-    ///   - Delta
-    ///   - BCJ
-    ///   - LZMA2 (always enabled)
-    LzmaFilter filters;
+    LzmaFilter[] filters;
 
     /// Number of bytes between 1 and 256 to use for the Delta filter.
     /// For example for 16bit PCM stero audio, you should use 4.
@@ -1522,16 +1550,26 @@ struct CompressLzma
         if (extreme)
             pres |= LZMA_PRESET_EXTREME;
 
-        const chain = stream.buildFilterChain(filters, pres, deltaDist);
-
-        // dfmt off
-        const res = format == LzmaFormat.xz ?
-            lzma_stream_encoder(&stream.strm, chain.ptr, check.toLzma()) :
-            lzma_raw_encoder(&stream.strm, chain.ptr);
-        // dfmt on
+        lzma_ret res;
+        final switch (format)
+        {
+        case LzmaFormat.xz:
+            const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
+            res = lzma_stream_encoder(&stream.strm, chain.ptr, check.toLzma());
+            break;
+        case LzmaFormat.legacy:
+            lzma_lzma_preset(&stream.optsLzma, preset);
+            res = lzma_alone_encoder(&stream.strm, &stream.optsLzma);
+            break;
+        case LzmaFormat.raw:
+        case LzmaFormat.rawLegacy:
+        case LzmaFormat.rawCopy:
+            const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
+            res = lzma_raw_encoder(&stream.strm, chain.ptr);
+            break;
+        }
 
         enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
-
     }
 
     Stream initialize()
@@ -1558,21 +1596,6 @@ struct CompressLzma
     {
         lzma_end(&stream.strm);
     }
-}
-
-private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"inputEmpty" inputEmpty)
-{
-    import std.conv : to;
-
-    const action = inputEmpty ? lzma_action.FINISH : lzma_action.RUN;
-    const res = lzma_code(&stream.strm, action);
-
-    enforce(
-        res == lzma_ret.OK || res == lzma_ret.STREAM_END,
-        "LZMA encoding failed with code: " ~ res.to!string
-    );
-
-    return cast(Flag!"streamEnded")(res == lzma_ret.STREAM_END);
 }
 
 auto decompressXz(I)(I input, size_t chunkSize = defaultChunkSize)
@@ -1610,11 +1633,16 @@ struct DecompressLzma
     /// ditto
     Flag!"extreme" extreme;
     /// ditto
-    LzmaFilter filters;
+    LzmaFilter[] filters;
     /// ditto
     uint deltaDist;
 
     alias Stream = LzmaStream;
+
+    this(LzmaFormat format)
+    {
+        this.format = format;
+    }
 
     /// convenience constructor to copy parameters of the compression
     /// for the decompression. Especially useful for the raw decompression,
@@ -1630,22 +1658,28 @@ struct DecompressLzma
 
     private void initStream(Stream stream)
     {
-        lzma_ret res;
-        if (format == LzmaFormat.xz)
-        {
-            ulong memlim = memLimit;
-            if (memLimit == size_t.max)
-                memlim = ulong.max;
+        ulong memlim = memLimit;
+        if (memLimit == size_t.max)
+            memlim = ulong.max;
 
-            res = lzma_stream_decoder(&stream.strm, memlim, 0);
-        }
-        else if (format == LzmaFormat.raw)
+        lzma_ret res;
+
+        final switch (format)
         {
+        case LzmaFormat.xz:
+            res = lzma_stream_decoder(&stream.strm, memlim, 0);
+            break;
+        case LzmaFormat.legacy:
+            res = lzma_alone_decoder(&stream.strm, memlim);
+            break;
+        case LzmaFormat.raw:
+        case LzmaFormat.rawLegacy:
+        case LzmaFormat.rawCopy:
             uint pres = preset;
             if (extreme)
                 pres |= LZMA_PRESET_EXTREME;
 
-            const chain = stream.buildFilterChain(filters, pres, deltaDist);
+            const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
 
             res = lzma_raw_decoder(&stream.strm, chain.ptr);
         }
@@ -1676,6 +1710,21 @@ struct DecompressLzma
     {
         lzma_end(&stream.strm);
     }
+}
+
+private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"inputEmpty" inputEmpty)
+{
+    import std.conv : to;
+
+    const action = inputEmpty ? lzma_action.FINISH : lzma_action.RUN;
+    const res = lzma_code(&stream.strm, action);
+
+    enforce(
+        res == lzma_ret.OK || res == lzma_ret.STREAM_END,
+        "LZMA encoding failed with code: " ~ res.to!string
+    );
+
+    return cast(Flag!"streamEnded")(res == lzma_ret.STREAM_END);
 }
 
 ///
@@ -1722,7 +1771,7 @@ unittest
         .join();
 
     CompressLzma comp;
-    comp.filters |= LzmaFilter.delta;
+    comp.filters ~= LzmaFilter.delta;
     comp.deltaDist = 8; // sequential data of 8 byte integers
 
     const withDelta = [input]
@@ -1783,7 +1832,7 @@ unittest
 
     CompressLzma comp;
     comp.format = LzmaFormat.raw;
-    comp.filters |= LzmaFilter.delta;
+    comp.filters ~= LzmaFilter.delta;
     comp.deltaDist = 8; // sequential data of 8 byte integers
 
     const withDelta = [input]
