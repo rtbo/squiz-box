@@ -349,6 +349,112 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
     }
 }
 
+/// Copy algorithm do not transform data at all
+/// This is useful in cases of reading/writing data
+/// that may or may not be compressed. Using Copy
+/// allows that the same code handles both kind of streams.
+final class CopyStream : SquizStream
+{
+    private const(ubyte)[] _inp;
+    size_t _totalIn;
+    private ubyte[] _outp;
+    size_t _totalOut;
+
+    @property const(ubyte)[] input() const
+    {
+        return _inp;
+    }
+
+    @property void input(const(ubyte)[] inp)
+    {
+        _inp = inp;
+    }
+
+    @property size_t totalInput() const
+    {
+        return _totalIn;
+    }
+
+    @property inout(ubyte)[] output() inout
+    {
+        return _outp;
+    }
+
+    @property void output(ubyte[] outp)
+    {
+        _outp = outp;
+    }
+
+    @property size_t totalOutput() const
+    {
+        return _totalOut;
+    }
+}
+
+/// ditto
+struct Copy
+{
+    static assert(isSquizAlgo!Copy);
+
+    CopyStream initialize()
+    {
+        return new CopyStream;
+    }
+
+    Flag!"streamEnded" process(CopyStream stream, Flag!"inputEmpty" inputEmpty)
+    {
+        import std.algorithm : min;
+
+        const len = min(stream._inp.length, stream._outp.length);
+
+        stream._outp[0 .. len] = stream._inp[0 .. len];
+
+        stream._inp = stream._inp[len .. $];
+        stream._outp = stream._outp[len .. $];
+        stream._totalIn += len;
+        stream._totalOut += len;
+
+        return cast(Flag!"streamEnded")(inputEmpty && stream._inp.length == 0);
+    }
+
+    void reset(CopyStream stream)
+    {
+        stream._inp = null;
+        stream._outp = null;
+        stream._totalIn = 0;
+        stream._totalOut = 0;
+    }
+
+    void end(CopyStream)
+    {
+    }
+}
+
+/// ditto
+auto copy(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, Copy.init, chunkSize);
+}
+
+///
+@("Copy")
+unittest
+{
+    import test.util : generateRepetitiveData;
+    import std.array : join;
+
+    const len = 10_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    /// copying with arbitrary chunk sizes on input and output
+    const cop1 = generateRepetitiveData(len, phrase, 1231).copy(234).join();
+    const cop2 = generateRepetitiveData(len, phrase, 296).copy(6712).join();
+
+    assert(input == cop1);
+    assert(input == cop2);
+}
+
 /// Describe what type of header and trailer are wrapping
 /// a deflated stream.
 enum ZlibFormat
