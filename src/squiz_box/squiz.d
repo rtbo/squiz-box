@@ -1478,6 +1478,7 @@ enum LzmaFormat
     /// Lzma with Xz format, suitable to write *.xz files
     xz,
     /// LZMA1 encoding and format, suitable for legacy *.lzma files
+    /// This format doesn't support filters.
     legacy,
     /// Raw LZMA2 compression, without header/trailer.
     /// Use this to include compressed LZMA data in
@@ -1626,6 +1627,7 @@ struct CompressLzma
             res = lzma_stream_encoder(&stream.strm, chain.ptr, check.toLzma());
             break;
         case LzmaFormat.legacy:
+            enforce(filters.length == 0, "Filters are not supported with the legacy format");
             lzma_lzma_preset(&stream.optsLzma, preset);
             res = lzma_alone_encoder(&stream.strm, &stream.optsLzma);
             break;
@@ -1823,6 +1825,31 @@ unittest
 }
 
 ///
+@("Integrity check XZ")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    auto squized = only(input)
+        .compressXz()
+        .join()
+        .dup; // dup because const(ubyte)[] is returned
+
+    squized[squized.length / 2] += 1;
+
+    assertThrown(
+        only(squized)
+            .decompressXz()
+            .join()
+    );
+}
+
+///
 @("Compress / Decompress XZ with filter")
 unittest
 {
@@ -1849,7 +1876,10 @@ unittest
         .join();
 
     assert(output == input);
-    assert(reference.length > withDelta.length * 20);
+    // < 20% compression without filter (sequential data is tough)
+    // < 0.5% compression with delta (peace of cake)
+    assert(input.length > reference.length * 5);
+    assert(input.length > withDelta.length * 200);
 }
 
 ///
@@ -1863,6 +1893,10 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
+    const reference = only(input)
+        .compressXz()
+        .join();
+
     const squized = only(input)
         .compressLzmaRaw()
         .join();
@@ -1871,8 +1905,9 @@ unittest
         .decompressLzmaRaw()
         .join();
 
-    assert(squized.length < input.length);
     assert(output == input);
+    assert(squized.length < input.length);
+    assert(squized.length < reference.length); // win header/trailer space
 
     // for such repetitive data, ratio is around 1.13%
     // also generally better than zlib, bzip2 struggles a lot for repetitive data
@@ -1908,5 +1943,106 @@ unittest
         .join();
 
     assert(output == input);
-    assert(reference.length > withDelta.length * 20);
+    // < 20% compression without filter (sequential data is tough)
+    // < 0.4% compression with delta (peace of cake)
+    assert(input.length > reference.length * 5);
+    assert(input.length > withDelta.length * 250);
+}
+
+///
+@("Compress / Decompress Lzma Legacy")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    auto comp = CompressLzma(LzmaFormat.legacy);
+    auto decomp = DecompressLzma(comp);
+
+    const squized = only(input)
+        .squiz(comp)
+        .join();
+
+    const output = only(squized)
+        .squiz(decomp)
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such repetitive data, ratio is around 1.13%
+    // also generally better than zlib, bzip2 struggles a lot for repetitive data
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.003);
+}
+
+///
+@("Compress / Decompress Lzma Raw Legacy")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    auto comp = CompressLzma(LzmaFormat.rawLegacy);
+    auto decomp = DecompressLzma(comp);
+
+    const squized = only(input)
+        .squiz(comp)
+        .join();
+
+    const output = only(squized)
+        .squiz(decomp)
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such repetitive data, ratio is around 1.13%
+    // also generally better than zlib, bzip2 struggles a lot for repetitive data
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.003);
+}
+
+///
+@("Compress / Decompress Lzma rawLegacy with filter")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const input = generateSequentialData(len, 1245, 27).join();
+
+    const reference = only(input)
+        .squiz(CompressLzma(LzmaFormat.legacy))
+        .join();
+
+    CompressLzma comp;
+    comp.format = LzmaFormat.rawLegacy;
+    comp.filters ~= LzmaFilter.delta;
+    comp.deltaDist = 8; // sequential data of 8 byte integers
+
+    auto decomp = DecompressLzma(comp);
+
+    const withDelta = only(input)
+        .squiz(comp)
+        .join();
+
+    const output = only(withDelta)
+        .squiz(decomp)
+        .join();
+
+    assert(output == input);
+    // < 20% compression without filter (sequential data is tough)
+    // < 0.4% compression with delta (peace of cake)
+    assert(input.length > reference.length * 5);
+    assert(input.length > withDelta.length * 250);
 }
