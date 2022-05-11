@@ -339,7 +339,7 @@ final class FileCursor : SearchableCursor
 
         _pos++;
         enforce(_pos <= _end, "No more bytes");
-        return cast(ubyte)getc(_file.getFP());
+        return cast(ubyte) getc(_file.getFP());
     }
 
     ubyte[] read(ubyte[] buffer)
@@ -356,19 +356,36 @@ final class FileCursor : SearchableCursor
     }
 }
 
+auto cursorByteRange(C)(C cursor, ulong len = ulong.max, size_t chunkSize = defaultChunkSize)
+        if (is(C : Cursor))
+{
+    import std.algorithm : min;
+    import std.range : only;
+
+    static if (is(C : ArrayCursor))
+    {
+        const l = cast(size_t) min(len, cursor._array.length - cursor._pos);
+        return only(cursor._array[cursor._pos .. cursor._pos + l]);
+    }
+    else
+    {
+        return CursorByteRange!C(cursor, len, cast(size_t) min(len, chunkSize));
+    }
+}
+
 /// ByteRange that takes its data from Cursor.
 /// Optionally stopping before data is exhausted.
-struct CursorByteRange
+struct CursorByteRange(C) if (is(C : Cursor))
 {
-    private Cursor _input;
-    private ulong _end;
+    private C _input;
+    private ulong _len;
     private ubyte[] _buffer;
     private ubyte[] _chunk;
 
-    this(Cursor input, size_t chunkSize = 4096, ulong end = ulong.max)
+    this(C input, ulong len = ulong.max, size_t chunkSize = 4096)
     {
         _input = input;
-        _end = end;
+        _len = len;
         _buffer = new ubyte[chunkSize];
         if (!_input.eoi)
             prime();
@@ -378,16 +395,17 @@ struct CursorByteRange
     {
         import std.algorithm : min;
 
-        const len = cast(size_t) min(_buffer.length, _end - _input.pos);
+        const len = cast(size_t) min(_buffer.length, _len);
         if (len == 0)
             _chunk = null;
         else
             _chunk = _input.read(_buffer[0 .. len]);
+        _len -= len;
     }
 
     @property bool empty()
     {
-        return (_input.eoi || _input.pos >= _end) && _chunk.length == 0;
+        return (_input.eoi || _len == 0) && _chunk.length == 0;
     }
 
     @property ByteChunk front()

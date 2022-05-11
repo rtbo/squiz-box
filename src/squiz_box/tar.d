@@ -340,7 +340,7 @@ private class ArchiveTarExtractEntry : ArchiveExtractEntry
             _input.pos == _start,
             "Data cursor has moved, this entry is not valid anymore"
         );
-        return inputRangeObject(CursorByteRange(_input, chunkSize, _end));
+        return inputRangeObject(cursorByteRange(_input, _end - _input.pos, chunkSize));
     }
 }
 
