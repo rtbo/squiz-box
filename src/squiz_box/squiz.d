@@ -119,8 +119,8 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
-    const ctSquized = [input].squiz(ctAlgo).join();
-    const rtSquized = [input].squiz(rtAlgo).join();
+    const ctSquized = only(input).squiz(ctAlgo).join();
+    const rtSquized = only(input).squiz(rtAlgo).join();
 
     assert(ctSquized == rtSquized);
 }
@@ -280,7 +280,7 @@ auto squizMaxOut(I, A)(I input, A algo, ulong maxOut, size_t chunkSize = default
     const sz = cast(size_t) min(maxOut, chunkSize);
     auto chunkBuffer = new ubyte[sz];
     auto stream = algo.initialize();
-    return Squiz!(I, A, Yes.endStream)(input, algo, stream, chunkBuffer, maxOut, true);
+    return Squiz!(I, A, Yes.endStream)(input, algo, stream, chunkBuffer, maxOut);
 }
 
 // Common transformation range for all compression/decompression functions.
@@ -318,7 +318,6 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
         this.stream = stream;
         this.chunkBuffer = chunkBuffer;
         this.maxLen = maxLen;
-        this.debugStream = debugStream;
         prime();
     }
 
@@ -1007,10 +1006,10 @@ unittest
     const input = generateRepetitiveData(len, phrase).join();
 
     // deflating
-    const squized = [input].squiz(def).join();
+    const squized = only(input).squiz(def).join();
 
     // re-inflating
-    const output = [squized].squiz(inf).join();
+    const output = only(squized).squiz(inf).join();
 
     assert(squized.length < input.length);
     assert(output == input);
@@ -1039,7 +1038,7 @@ unittest
     inHead.comment = "A very boring file";
 
     // deflating
-    const squized = [input]
+    const squized = only(input)
         .deflateGz(inHead)
         .join();
 
@@ -1052,7 +1051,7 @@ unittest
         numCalls++;
     }
 
-    const output = [squized]
+    const output = only(squized)
         .inflateGz(&setOutHead)
         .join();
 
@@ -1074,12 +1073,12 @@ unittest
     const input = generateRepetitiveData(len, phrase).join();
 
     // deflating
-    const squized = [input]
+    const squized = only(input)
         .deflateRaw()
         .join();
 
     // re-inflating
-    const output = [squized]
+    const output = only(squized)
         .inflateRaw()
         .join();
 
@@ -1339,13 +1338,11 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
-    // deflating
-    const squized = [input]
+    const squized = only(input)
         .compressBzip2()
         .join();
 
-    // re-inflating
-    const output = [squized]
+    const output = only(squized)
         .decompressBzip2()
         .join();
 
@@ -1809,13 +1806,11 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
-    // deflating
-    const squized = [input]
+    const squized = only(input)
         .compressXz()
         .join();
 
-    // re-inflating
-    const output = [squized]
+    const output = only(squized)
         .decompressXz()
         .join();
 
@@ -1837,7 +1832,7 @@ unittest
     const len = 100_000;
     const input = generateSequentialData(len, 1245, 27).join();
 
-    const reference = [input]
+    const reference = only(input)
         .compressXz()
         .join();
 
@@ -1845,11 +1840,11 @@ unittest
     comp.filters ~= LzmaFilter.delta;
     comp.deltaDist = 8; // sequential data of 8 byte integers
 
-    const withDelta = [input]
+    const withDelta = only(input)
         .squiz(comp)
         .join();
 
-    const output = [withDelta]
+    const output = only(withDelta)
         .decompressXz()
         .join();
 
@@ -1868,13 +1863,11 @@ unittest
     const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
     const input = generateRepetitiveData(len, phrase).join();
 
-    // deflating
-    const squized = [input]
+    const squized = only(input)
         .compressLzmaRaw()
         .join();
 
-    // re-inflating
-    const output = [squized]
+    const output = only(squized)
         .decompressLzmaRaw()
         .join();
 
@@ -1897,7 +1890,7 @@ unittest
     const len = 100_000;
     const input = generateSequentialData(len, 1245, 27).join();
 
-    const reference = [input]
+    const reference = only(input)
         .compressLzmaRaw()
         .join();
 
@@ -1906,12 +1899,11 @@ unittest
     comp.filters ~= LzmaFilter.delta;
     comp.deltaDist = 8; // sequential data of 8 byte integers
 
-    const withDelta = [input]
+    const withDelta = only(input)
         .squiz(comp)
         .join();
 
-    const output = [withDelta]
-        // using compression parameters for decompression
+    const output = only(withDelta) // using compression parameters for decompression
         .squiz(DecompressLzma(comp))
         .join();
 
