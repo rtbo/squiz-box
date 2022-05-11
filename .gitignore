@@ -1,1 +1,4 @@
 .vscode/
+.dub/
+dub.selections.json
+squiz-box.lib

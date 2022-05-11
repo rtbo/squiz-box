@@ -182,7 +182,7 @@ if host_machine.endian() == 'big'
     xz_defs += ['-DWORDS_BIGENDIAN']
 endif
 
-xz_lib = static_library('xz', xz_conf, xz_src,
+xz_lib = static_library('lzma', xz_conf, xz_src,
     install: false,
     include_directories: xz_inc,
     c_args: xz_defs,

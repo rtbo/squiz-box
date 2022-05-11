@@ -1,0 +1,19 @@
+{
+    "name": "squiz-box",
+    "authors": ["Rémi Thebault (rtbo) <remi.thebault@gmail.com>"],
+    "description": "Range based compression and archiving library",
+    "copyright": "Copyright (C) 2022, Rémi Thebault",
+    "license": "MIT",
+    "targetType": "library",
+
+    "sourcePaths": ["src"],
+
+    "sourceFiles-windows-x86_64": [
+        "$PACKAGE_DIR/windows-x64/bz2.lib",
+        "$PACKAGE_DIR/windows-x64/lzma.lib"
+    ],
+
+    "versions-windows": [ "Windows10" ],
+
+    "libs-linux": ["bz2", "lzma"]
+}
