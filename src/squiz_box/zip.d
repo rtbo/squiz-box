@@ -381,7 +381,7 @@ private class Deflater
 
             stream.output = deflateBuffer[deflated.length .. $];
 
-            const ended = algo.process(stream, cast(Flag!"inputEmpty")input.empty);
+            const ended = algo.process(stream, cast(Flag!"lastChunk")input.empty);
 
             deflated = deflateBuffer[0 .. $ - stream.output.length];
 
@@ -1210,7 +1210,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 
             stream.output = chunkBuffer[chunk.length .. $];
 
-            ended = algo.process(stream, cast(Flag!"inputEmpty")input.eoi);
+            ended = algo.process(stream, cast(Flag!"lastChunk")input.eoi);
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
 

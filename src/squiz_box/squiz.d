@@ -54,7 +54,7 @@ template isSquizAlgo(A)
 {
     enum isSquizAlgo = is(typeof((A algo) {
                 auto stream = algo.initialize();
-                Flag!"streamEnded" ended = algo.process(stream, Yes.inputEmpty);
+                Flag!"streamEnded" ended = algo.process(stream, Yes.lastChunk);
                 algo.reset(stream);
                 algo.end(stream);
                 static assert(is(typeof(stream) : SquizStream));
@@ -78,12 +78,12 @@ interface SquizAlgo
     SquizStream initialize();
 
     /// Processes the input stream data to produce output stream data.
-    /// inputEmpty indicates that the input chunk in stream is the last one.
+    /// lastChunk indicates that the input chunk in stream is the last one.
     /// This is an indication to the algorithm that it can start to finish
     /// the work.
     /// Returned value indicates that there won't be more output generated
     /// than the one in stream.output
-    Flag!"streamEnded" process(SquizStream stream, Flag!"inputEmpty" inputEmpty);
+    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk);
 
     /// Reset the state of this stream, yet reusing the same
     /// allocating resources, in order to start processing
@@ -148,9 +148,9 @@ private class CSquizAlgo(A) : SquizAlgo
         return algo.initialize();
     }
 
-    Flag!"streamEnded" process(SquizStream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk)
     {
-        return algo.process(checkStream(stream), inputEmpty);
+        return algo.process(checkStream(stream), lastChunk);
     }
 
     void reset(SquizStream stream)
@@ -350,7 +350,7 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
             const len = min(chunkBuffer.length - chunk.length, maxLen);
             stream.output = chunkBuffer[chunk.length .. chunk.length + len];
 
-            const streamEnded = algo.process(stream, cast(Flag!"inputEmpty") input.empty);
+            const streamEnded = algo.process(stream, cast(Flag!"lastChunk") input.empty);
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
             maxLen -= len;
@@ -471,7 +471,7 @@ struct Copy
         return new CopyStream;
     }
 
-    Flag!"streamEnded" process(CopyStream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(CopyStream stream, Flag!"lastChunk" lastChunk)
     {
         import std.algorithm : min;
 
@@ -484,7 +484,7 @@ struct Copy
         stream._totalIn += len;
         stream._totalOut += len;
 
-        return cast(Flag!"streamEnded")(inputEmpty && stream._inp.length == 0);
+        return cast(Flag!"streamEnded")(lastChunk && stream._inp.length == 0);
     }
 
     void reset(CopyStream stream)
@@ -816,9 +816,9 @@ struct Deflate
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
     {
-        const flush = inputEmpty ? Z_FINISH : Z_NO_FLUSH;
+        const flush = lastChunk ? Z_FINISH : Z_NO_FLUSH;
         const res = squiz_box.c.zlib.deflate(&stream.strm, flush);
 
         enforce(
@@ -958,7 +958,7 @@ struct Inflate
         return stream;
     }
 
-    package Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" /+ inputEmpty +/ )
+    package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ )
     {
         const res = squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH);
         //
@@ -992,7 +992,7 @@ struct Inflate
 }
 
 ///
-@("Delfate / Inflate")
+@("Deflate / Inflate")
 unittest
 {
     import test.util;
@@ -1210,9 +1210,9 @@ struct CompressBzip2
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
     {
-        const action = inputEmpty ? BZ_FINISH : BZ_RUN;
+        const action = lastChunk ? BZ_FINISH : BZ_RUN;
         const res = BZ2_bzCompress(&stream.strm, action);
 
         if (res == BZ_STREAM_END)
@@ -1289,7 +1289,7 @@ struct DecompressBzip2
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
     {
         const res = BZ2_bzDecompress(&stream.strm);
 
@@ -1649,9 +1649,9 @@ struct CompressLzma
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
     {
-        return lzmaCode(stream, inputEmpty);
+        return lzmaCode(stream, lastChunk);
     }
 
     void reset(Stream stream)
@@ -1756,9 +1756,9 @@ struct DecompressLzma
             enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"inputEmpty" inputEmpty)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
     {
-        return lzmaCode(stream, inputEmpty);
+        return lzmaCode(stream, lastChunk);
     }
 
     Stream initialize()
@@ -1782,11 +1782,11 @@ struct DecompressLzma
     }
 }
 
-private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"inputEmpty" inputEmpty)
+private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"lastChunk" lastChunk)
 {
     import std.conv : to;
 
-    const action = inputEmpty ? lzma_action.FINISH : lzma_action.RUN;
+    const action = lastChunk ? lzma_action.FINISH : lzma_action.RUN;
     const res = lzma_code(&stream.strm, action);
 
     enforce(
