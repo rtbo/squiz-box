@@ -9,8 +9,7 @@ On Linux, you will need `liblzma` and `libbz2` installed.
 On Windows, a compiled copy of these libraries is shipped with the package (only Windows 64 bit is supported).
 
 Squiz-box is developped with Meson, which will build the C libraries if they are not found.
-If you want to use squiz-box in a Meson project, you can either install it,
-or use it as a subproject.
+If you want to use squiz-box in a Meson project, you can use it as a subproject.
 
 To build, test on Linux:
 ```sh
@@ -28,10 +27,6 @@ meson builddir -Ddefault_library=static
 cd builddir
 ninja && squiz-test.exe
 ```
-
-To install it, run `ninja install` (you probably want a release build).
-Once installed, `meson` can find `squiz-box` with `pkg-config`.
-
 
 ## Compression / decompression
 
