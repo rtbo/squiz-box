@@ -95,7 +95,7 @@ There is also WIP for 7z.
 
 ### Compress data with zlib
 ```d
-import squiz_box.squiz;
+import squiz_box;
 import std.range;
 
 const ubyte[] data = myDataToCompress();
@@ -114,7 +114,7 @@ only(data)
 
 ### Re-inflate data with zlib
 ```d
-import squiz_box.squiz;
+import squiz_box;
 import std.array;
 
 const data = receiveFromNetwork() // InputRange of const(ubyte)[]
@@ -127,9 +127,7 @@ const data = receiveFromNetwork() // InputRange of const(ubyte)[]
 Zip a directory:
 
 ```d
-import squiz_box.box;
-import squiz_box.squiz;
-import squiz_box.util;
+import squiz_box;
 
 import std.algorithm;
 import std.file;
@@ -146,9 +144,7 @@ dirEntries(root, SpanMode.breadth, false)
 Create a `.tar.xz` file from a directory (with little bit more control):
 
 ```d
-import squiz_box.box;
-import squiz_box.squiz;
-import squiz_box.util;
+import squiz_box;
 
 import std.algorithm;
 import std.file;
@@ -170,6 +166,22 @@ dirEntries(root, SpanMode.breadth, false)
     .writeBinaryFile("squiz-box-12.5.tar.xz");
 ```
 
+### Extract an archive into a directory
+
+```d
+import squiz_box;
+
+const archive = "my-archive.tar.gz";
+const extractionSite = "some-dir";
+
+mkdir(extractionSite);
+
+readBinaryFile(archive)
+    .inflateGz()
+    .readTarArchive()
+    .each!(e => e.extractTo(extractionSite));
+```
+
 ### Full control over the streaming process
 
 Sometimes, D ranges are not practical. Think of a receiver thread that
@@ -180,7 +192,7 @@ thread. In that situation you can use the streaming API directly.
 
 The following code gives the spirit of it.
 ```d
-import squiz_box.squiz;
+import squiz_box;
 
 // Deflate is a good fit for low latency streaming
 auto algo = Deflate.init;
