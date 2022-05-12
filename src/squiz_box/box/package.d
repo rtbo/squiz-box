@@ -398,20 +398,17 @@ unittest
     import std.algorithm;
     import std.file;
     import std.path;
-    import std.stdio;
 
     import test.util;
 
     const root = buildNormalizedPath(__FILE_FULL_PATH__.dirName.dirName.dirName.dirName);
     const prefix = "squiz-box-12.5/"; // don't forget trailing '/'!
 
+    const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
+
     dirEntries(root, SpanMode.breadth, false)
         .filter!(e => !e.isDir)
-        .filter!(e => !e.name.canFind(".git"))
-        .filter!(e => !e.name.canFind(".dub"))
-        .filter!(e => !e.name.canFind(".vscode"))
-        .filter!(e => !e.name.canFind("bld-release"))
-        .filter!(e => !e.name.canFind("build"))
+        .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
         .map!(e => fileEntry(e.name, root, prefix))
         .createTarArchive()
         .compressXz()
