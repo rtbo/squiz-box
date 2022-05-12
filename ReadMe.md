@@ -2,6 +2,37 @@
 
 A D library that handles compression / decompression and archiving.
 
+## Download, build, install
+
+To use `squiz-box`, the easiest is to use the Dub package from the registry.
+On Linux, you will need `liblzma` and `libbz2` installed.
+On Windows, a compiled copy of these libraries is shipped with the package (only Windows 64 bit is supported).
+
+Squiz-box is developped with Meson, which will build the C libraries if they are not found.
+If you want to use squiz-box in a Meson project, you can either install it,
+or use it as a subproject.
+
+To build, test on Linux:
+```sh
+meson builddir -Ddefault_library=static
+cd builddir
+ninja && ./squiz-test
+```
+
+To build test on Windows:
+```dos
+rem Visual Studio prompt is required
+rem A script is provided to help this (needs vswhere)
+win_env_vs.bat
+meson builddir -Ddefault_library=static
+cd builddir
+ninja && squiz-test.exe
+```
+
+To install it, run `ninja install` (you probably want a release build).
+Once installed, `meson` can find `squiz-box` with `pkg-config`.
+
+
 ## Compression / decompression
 
 The compression is designed to work with ranges, which makes it suitable
@@ -59,9 +90,6 @@ The following formats are supported:
 
 There is also WIP for 7z.
 
-### API
-
-README TO BE WRITTEN
 
 ## Code examples
 
@@ -71,7 +99,8 @@ import squiz_box.squiz;
 import std.range;
 
 const ubyte[] data = myDataToCompress();
-auto algo = Deflate.init; // defaults to zlib format and compression level 6
+
+auto algo = Deflate.init; // defaults to zlib format
 
 only(data)              // InputRange of const(ubyte)[] (uncompressed)
   .squiz(algo)          // also InputRange of const(ubyte)[] (deflated)
@@ -93,11 +122,59 @@ const data = receiveFromNetwork() // InputRange of const(ubyte)[]
   .join();                        // const(ubyte)[]
 ```
 
+### Create an archive from a directory
+
+Zip a directory:
+
+```d
+import squiz_box.box;
+import squiz_box.squiz;
+import squiz_box.util;
+
+import std.algorithm;
+import std.file;
+
+const root = buildNormalizedPath(someDir);
+
+dirEntries(root, SpanMode.breadth, false)
+    .filter!(e => !e.isDir)
+    .map!(e => fileEntry(e.name, root, null))    // range of FileEntry
+    .createZipArchive()                          // range of bytes
+    .writeBinaryFile("some-dir.zip");
+```
+
+Create a `.tar.xz` file from a directory (with little bit more control):
+
+```d
+import squiz_box.box;
+import squiz_box.squiz;
+import squiz_box.util;
+
+import std.algorithm;
+import std.file;
+import std.path;
+
+const root = squizBoxDir;
+
+// prefix all files path in the archive
+const prefix = "squiz-box-12.5/"; // don't forget trailing '/'!
+
+const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
+
+dirEntries(root, SpanMode.breadth, false)
+    .filter!(e => !e.isDir)
+    .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
+    .map!(e => fileEntry(e.name, root, prefix))
+    .createTarArchive()
+    .compressXz()
+    .writeBinaryFile("squiz-box-12.5.tar.xz");
+```
+
 ### Full control over the streaming process
 
-Sometimes, D range are not practical. Think of a receiver thread that
+Sometimes, D ranges are not practical. Think of a receiver thread that
 receives data, compresses it and sends it over network with low latency.
-You will not wait to receive the full data before start streaming, and
+You will not wait to receive the full data before to start streaming, and
 a D range is probably not well suited to receive the data from a different
 thread. In that situation you can use the streaming API directly.
 
@@ -116,8 +193,9 @@ auto streamEnded = algo.process(stream, No.lastChunk);
 // send buffer content out
 // at some point we send the last chunk and receive notification that the stream is done.
 
-// reset the stream, but keep the allocated resources for next round
+// we can reset the stream and keep the allocated resources for a new round
 algo.reset(stream);
+
 // more streaming...
 
 // finally we can release the resources
