@@ -9,11 +9,12 @@ squiz_src = files([
     'src/squiz_box/c/lzma.d',
     'src/squiz_box/c/zlib.d',
 
-    'src/squiz_box/core.d',
+    'src/squiz_box/box/package.d',
+    'src/squiz_box/box/tar.d',
+    'src/squiz_box/box/zip.d',
     'src/squiz_box/priv.d',
     'src/squiz_box/squiz.d',
-    'src/squiz_box/tar.d',
-    'src/squiz_box/zip.d',
+    'src/squiz_box/util.d',
 ])
 
 squiz_inc = include_directories('src')

@@ -2,7 +2,7 @@ module squiz_box.priv;
 
 package(squiz_box):
 
-import squiz_box.core : ByteChunk, defaultChunkSize, EntryType, isByteRange;
+import squiz_box.squiz : ByteChunk, defaultChunkSize, isByteRange;
 
 import std.datetime.systime;
 import std.exception;
@@ -573,3 +573,67 @@ struct LittleEndian(size_t sz) if (sz == 2 || sz == 4 || sz == 8)
 static assert((LittleEndian!2).sizeof == 2);
 static assert((LittleEndian!4).sizeof == 4);
 static assert((LittleEndian!8).sizeof == 8);
+
+/// same as std.stdio.File.byChunk but returns const(ubyte)[]
+struct ByChunkImpl
+{
+    import std.stdio : File;
+
+private:
+    File    file_;
+    ubyte[] chunk_;
+
+    void prime()
+    {
+        chunk_ = file_.rawRead(chunk_);
+        if (chunk_.length == 0)
+            file_.detach();
+    }
+
+public:
+    this(File file, size_t size)
+    {
+        this(file, new ubyte[](size));
+    }
+
+    this(File file, ubyte[] buffer)
+    {
+        import std.exception : enforce;
+        enforce(buffer.length, "size must be larger than 0");
+        file_ = file;
+        chunk_ = buffer;
+        prime();
+    }
+
+    // `ByChunk`'s input range primitive operations.
+    @property nothrow
+    bool empty() const
+    {
+        return !file_.isOpen;
+    }
+
+    /// Ditto
+    @property nothrow
+    const(ubyte)[] front()
+    {
+        version (assert)
+        {
+            import core.exception : RangeError;
+            if (empty)
+                throw new RangeError();
+        }
+        return chunk_;
+    }
+
+    /// Ditto
+    void popFront()
+    {
+        version (assert)
+        {
+            import core.exception : RangeError;
+            if (empty)
+                throw new RangeError();
+        }
+        prime();
+    }
+}

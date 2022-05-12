@@ -1,27 +1,15 @@
-module squiz_box.core;
+module squiz_box.box;
+
+import squiz_box.priv;
+import squiz_box.squiz;
+import squiz_box.util;
 
 import std.datetime.systime;
 import std.exception;
-import std.range.interfaces;
+import std.range;
 
-alias ByteChunk = const(ubyte)[];
-
-/// A dynamic type of input range of chunks of bytes
-alias ByteRange = InputRange!ByteChunk;
-
-/// Static check that a type is a byte range.
-template isByteRange(BR)
-{
-    import std.traits : isArray, Unqual;
-    import std.range : ElementType, isInputRange;
-
-    alias Arr = ElementType!BR;
-    alias El = ElementType!Arr;
-
-    enum isByteRange = isInputRange!BR && is(Unqual!El == ubyte);
-}
-
-static assert(isByteRange!ByteRange);
+public import squiz_box.box.tar;
+public import squiz_box.box.zip;
 
 /// Static check that a type is an InputRange of ArchiveCreateEntry
 template isCreateEntryRange(I)
@@ -52,26 +40,6 @@ template isExtractEntryRange(I)
 
 static assert(isExtractEntryRange!(ArchiveExtractEntry[]));
 
-/// default chunk size for data exchanges and I/O operations
-enum defaultChunkSize = 8192;
-
-/// Helper that return a range of binary chunks of data from a file.
-auto readBinaryFile(string filename, size_t chunkSize = defaultChunkSize)
-{
-    import std.stdio : File;
-
-    return ByChunkImpl(File(filename, "rb"), chunkSize);
-}
-
-/// Helper that eagerly writes binary chunks of data to a file.
-void writeBinaryFile(I)(I input, string filename) if (isByteRange!I)
-{
-    import std.algorithm : copy;
-    import std.stdio : File;
-
-    input.copy(File(filename, "wb").lockingBinaryWriter);
-}
-
 /// Type of an archive entry
 enum EntryType
 {
@@ -94,8 +62,8 @@ enum EntryMode
 
 /// Common interface to archive entry.
 /// Each type implementing ArchiveEntry is either for creation or for extraction, but not both.
-/// Entries for archive creation MUST implement ArchiveCreateEntry.
-/// Entries for archive extraction MUST implement ArchiveExtractionEntry.
+/// Entries for archive creation implement ArchiveCreateEntry.
+/// Entries for archive extraction implement ArchiveExtractionEntry.
 ///
 /// Instances of ArchiveCreateEntry are typically instanciated directly by the user or by thin helpers (e.g. FileArchiveEntry)
 /// Instances of ArchiveExtractEntry are instantiated by the extraction algorithm and their final type is hidden.
@@ -283,7 +251,8 @@ interface ArchiveExtractEntry : ArchiveEntry
 /// Create a file entry from a file path, relative to a base.
 /// archiveBase must be a parent path from filename,
 /// such as the the path of the entry is filename, relative to archiveBase.
-ArchiveCreateEntry fileEntryFromBase(string filename, string archiveBase)
+/// prefix is prepended to the name of the file in the archive.
+ArchiveCreateEntry fileEntry(string filename, string archiveBase, string prefix=null)
 {
     import std.path : absolutePath, buildNormalizedPath, relativePath;
     import std.string : startsWith;
@@ -293,7 +262,9 @@ ArchiveCreateEntry fileEntryFromBase(string filename, string archiveBase)
 
     enforce(fn.startsWith(ab), "archiveBase is not a parent of filename");
 
-    const pathInArchive = relativePath(fn, ab);
+    auto pathInArchive = relativePath(fn, ab);
+    if (prefix)
+        pathInArchive = prefix ~ pathInArchive;
 
     return new FileArchiveEntry(filename, pathInArchive);
 }
@@ -419,66 +390,27 @@ class FileArchiveEntry : ArchiveCreateEntry
     }
 }
 
-/// same as std.stdio.File.byChunk but returns const(ubyte)[]
-private struct ByChunkImpl
+unittest
 {
-    import std.stdio : File;
+    import squiz_box.squiz;
+    import squiz_box.util;
 
-private:
-    File    file_;
-    ubyte[] chunk_;
+    import std.algorithm;
+    import std.file;
+    import std.path;
 
-    void prime()
-    {
-        chunk_ = file_.rawRead(chunk_);
-        if (chunk_.length == 0)
-            file_.detach();
-    }
+    import test.util;
 
-public:
-    this(File file, size_t size)
-    {
-        this(file, new ubyte[](size));
-    }
+    const root = buildNormalizedPath(__FILE_FULL_PATH__.dirName.dirName.dirName.dirName);
+    const prefix = "squiz-box-12.5/"; // don't forget trailing '/'!
 
-    this(File file, ubyte[] buffer)
-    {
-        import std.exception : enforce;
-        enforce(buffer.length, "size must be larger than 0");
-        file_ = file;
-        chunk_ = buffer;
-        prime();
-    }
+    const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
 
-    // `ByChunk`'s input range primitive operations.
-    @property nothrow
-    bool empty() const
-    {
-        return !file_.isOpen;
-    }
-
-    /// Ditto
-    @property nothrow
-    const(ubyte)[] front()
-    {
-        version (assert)
-        {
-            import core.exception : RangeError;
-            if (empty)
-                throw new RangeError();
-        }
-        return chunk_;
-    }
-
-    /// Ditto
-    void popFront()
-    {
-        version (assert)
-        {
-            import core.exception : RangeError;
-            if (empty)
-                throw new RangeError();
-        }
-        prime();
-    }
+    dirEntries(root, SpanMode.breadth, false)
+        .filter!(e => !e.isDir)
+        .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
+        .map!(e => fileEntry(e.name, root, prefix))
+        .createTarArchive()
+        .compressXz()
+        .writeBinaryFile("squiz-box-12.5.tar.xz");
 }

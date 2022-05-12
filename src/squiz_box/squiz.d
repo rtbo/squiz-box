@@ -32,13 +32,36 @@ module squiz_box.squiz;
 import squiz_box.c.bzip2;
 import squiz_box.c.lzma;
 import squiz_box.c.zlib;
-import squiz_box.core;
 import squiz_box.priv;
 
 import std.datetime.systime;
 import std.exception;
 import std.range;
 import std.typecons;
+
+/// default chunk size for data exchanges and I/O operations
+enum defaultChunkSize = 8192;
+
+/// definition of a byte chunk, which is the unit of data
+/// exchanged during I/O and data transformation operations
+alias ByteChunk = const(ubyte)[];
+
+/// A dynamic type of input range of chunks of bytes
+alias ByteRange = InputRange!ByteChunk;
+
+/// Static check that a type is a byte range.
+template isByteRange(BR)
+{
+    import std.traits : isArray, Unqual;
+    import std.range : ElementType, isInputRange;
+
+    alias Arr = ElementType!BR;
+    alias El = ElementType!Arr;
+
+    enum isByteRange = isInputRange!BR && is(Unqual!El == ubyte);
+}
+
+static assert(isByteRange!ByteRange);
 
 /// Exception thrown when inconsistent data is given to
 /// a decompression algorithm.

@@ -1,7 +1,8 @@
-module squiz_box.tar;
+module squiz_box.box.tar;
 
-import squiz_box.core;
+import squiz_box.box;
 import squiz_box.priv;
+import squiz_box.squiz;
 
 import std.datetime.systime;
 import std.exception;
