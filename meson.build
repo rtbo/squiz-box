@@ -12,6 +12,7 @@ squiz_src = files([
     'src/squiz_box/box/package.d',
     'src/squiz_box/box/tar.d',
     'src/squiz_box/box/zip.d',
+    'src/squiz_box/package.d',
     'src/squiz_box/priv.d',
     'src/squiz_box/squiz.d',
     'src/squiz_box/util.d',

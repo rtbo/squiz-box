@@ -1,7 +1,6 @@
 module test.util;
 
-import squiz_box.squiz;
-import squiz_box.util;
+import squiz_box;
 
 import std.digest;
 import std.digest.sha;

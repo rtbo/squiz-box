@@ -1,10 +1,7 @@
 module test.archive;
 
-import squiz_box.squiz;
-import squiz_box.box;
-import squiz_box.util;
-
 import test.util;
+import squiz_box;
 
 import std.typecons;
 import std.digest;
