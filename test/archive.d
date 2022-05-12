@@ -1,9 +1,8 @@
 module test.archive;
 
-import squiz_box.core;
 import squiz_box.squiz;
-import squiz_box.tar;
-import squiz_box.zip;
+import squiz_box.box;
+import squiz_box.util;
 
 import test.util;
 
@@ -136,7 +135,7 @@ unittest
     auto base = dataGenPath();
 
     filesForArchive()
-        .map!(p => fileEntryFromBase(p, base))
+        .map!(p => fileEntry(p, base))
         .createTarArchive()
         .writeBinaryFile(archive.path);
 
@@ -290,7 +289,7 @@ unittest
     auto base = dataGenPath();
 
     filesForArchive()
-        .map!(p => fileEntryFromBase(p, base))
+        .map!(p => fileEntry(p, base))
         .createZipArchive()
         .writeBinaryFile(archive.path);
 
@@ -353,7 +352,7 @@ unittest
     mkdir(dm.path);
 
     filesForArchive()
-        .map!(p => fileEntryFromBase(p, base))
+        .map!(p => fileEntry(p, base))
         .createZipArchive()
         .readZipArchive()
         .each!(e => e.extractTo(dm.path));

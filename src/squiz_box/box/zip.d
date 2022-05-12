@@ -1,7 +1,7 @@
-module squiz_box.zip;
+module squiz_box.box.zip;
 
 import squiz_box.c.zlib;
-import squiz_box.core;
+import squiz_box.box;
 import squiz_box.squiz;
 import squiz_box.priv;
 

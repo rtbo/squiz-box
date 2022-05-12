@@ -2,8 +2,9 @@ module test.compress;
 
 import test.archive;
 import test.util;
-import squiz_box.core;
+import squiz_box.priv;
 import squiz_box.squiz;
+import squiz_box.util;
 
 import std.typecons;
 
