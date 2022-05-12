@@ -45,7 +45,7 @@ An algorithm refers to the compression algorithm properly, and format refers
 to a header and a trailer attached to the compressed data that gives information
 about decompression parameters and integrity checking.
 A raw format refers to data compressed without such header and trailer and can
-be used inside an externally defined format (e.g. game networking protocol).
+be used inside an externally defined format (e.g. zip, 7z, ...).
 
 | Algorithms | Squiz structs | Available formats |
 |-----|----|----|
@@ -54,7 +54,7 @@ be used inside an externally defined format (e.g. game networking protocol).
 | LZMA1 (legacy compression) | `CompressLzma`, `DecompressLzma` | Xz, Lzma (legacy format), Raw |
 | LZMA (aka. LZMA2)   | `CompressLzma`, `DecompressLzma` | Xz, Raw |
 
-In addition, the LZMA and LZMA2 compression also support additional filters
+In addition, the LZMA1 and LZMA compression also support additional filters
 that transorm the data before the compression stage in order to increase
 the compression ratio:
 
@@ -62,7 +62,7 @@ the compression ratio:
   - higher compression of repetitive binary data such as audio PCM, RGB...
 - BCJ (Branch/Call/Jump)
   - higher compression of compiled executable
-  - available for a set of architectures (X86, ARM, ...)
+  - available for a different architectures (X86, ARM, ...)
 
 ### API
 
@@ -90,6 +90,7 @@ The following formats are supported:
 
 There is also WIP for 7z.
 
+Archive update is not supported at this stage.
 
 ## Code examples
 
@@ -153,7 +154,8 @@ import std.path;
 const root = squizBoxDir;
 
 // prefix all files path in the archive
-const prefix = "squiz-box-12.5/"; // don't forget trailing '/'!
+// don't forget the trailing '/'!
+const prefix = "squiz-box-12.5/";
 
 const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
 
