@@ -4,6 +4,15 @@ project('squiz-box', ['c', 'd'],
 
 subdir('3rdparty')
 
+zstd_dep = dependency('libzstd',
+    method: 'pkg-config',
+    version: '>= 1.4.5',
+)
+if not zstd_dep.found()
+    zstd_proj = subproject('zstd')
+    zstd_dep = zstd_proj.get_variable('libzstd_dep')
+endif
+
 squiz_src = files([
     'src/squiz_box/c/bzip2.d',
     'src/squiz_box/c/lzma.d',
@@ -25,7 +34,7 @@ if host_machine.system() == 'windows'
     squiz_ver = ['Windows10']
 endif
 
-squiz_deps = [bz2_dep, xz_dep]
+squiz_deps = [bz2_dep, xz_dep, zstd_dep]
 
 squiz_lib = library('squiz-box', squiz_src,
     install: true,
