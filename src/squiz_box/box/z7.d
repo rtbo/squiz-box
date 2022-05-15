@@ -744,6 +744,7 @@ private struct Header
 
     static Header readHeader(C)(C cursor)
     {
+
         return Header.init;
     }
 
@@ -779,10 +780,16 @@ private struct Header
 
             assert(decompressed.length == decompressedSize);
 
+            if (folder.unpackCrc)
+            {
+                uint crc = crc32(0, decompressed.ptr, cast(uint)decompressed.length);
+                enforce(folder.unpackCrc == crc, "Header CRC check failed");
+            }
+
             headerBuf ~= decompressed;
         }
 
-
-        return Header.init;
+        auto hc = new ArrayCursor(headerBuf);
+        return readHeader(hc);
     }
 }
