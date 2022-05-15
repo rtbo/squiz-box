@@ -1,0 +1,10 @@
+{
+	"name": "test_dub",
+    "dependencies": {
+        "squiz-box": {
+            "path": "../.."
+        }
+    },
+    "sourceFiles": ["main.d"],
+    "targetType": "executable"
+}

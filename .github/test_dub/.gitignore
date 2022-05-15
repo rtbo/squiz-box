@@ -1,0 +1,3 @@
+.dub/
+*.exe
+test_dub

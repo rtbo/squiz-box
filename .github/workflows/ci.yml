@@ -29,6 +29,10 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         uses: ilammy/msvc-dev-cmd@v1.7.0
 
+      - name: Install Ubuntu deps
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: sudo apt-get install libzstd-dev
+
       - name: Install D Compiler and Dub
         uses: dlang-community/setup-dlang@v1
         with:
@@ -43,3 +47,6 @@ jobs:
           meson-version: ${{ matrix.meson }}
           options: --verbose
 
+      - name: Test Dub package
+        run: dub run --arch=x86_64
+        working-directory: .github/test_dub
