@@ -389,28 +389,3 @@ class FileArchiveEntry : ArchiveCreateEntry
         return inputRangeObject(ByChunkImpl(File(filePath, "rb"), chunkSize));
     }
 }
-
-unittest
-{
-    import squiz_box.squiz;
-    import squiz_box.util;
-
-    import std.algorithm;
-    import std.file;
-    import std.path;
-
-    import test.util;
-
-    const root = buildNormalizedPath(__FILE_FULL_PATH__.dirName.dirName.dirName.dirName);
-    const prefix = "squiz-box-12.5/"; // don't forget trailing '/'!
-
-    const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
-
-    dirEntries(root, SpanMode.breadth, false)
-        .filter!(e => !e.isDir)
-        .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
-        .map!(e => fileEntry(e.name, root, prefix))
-        .createTarArchive()
-        .compressXz()
-        .writeBinaryFile("squiz-box-12.5.tar.xz");
-}
