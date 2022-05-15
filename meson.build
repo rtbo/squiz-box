@@ -2,12 +2,16 @@ project('squiz-box', ['c', 'd'],
     version: '0.1.0',
 )
 
+
+thread_dep = dependency('threads')
+
 subdir('3rdparty')
 
 squiz_src = files([
     'src/squiz_box/c/bzip2.d',
     'src/squiz_box/c/lzma.d',
     'src/squiz_box/c/zlib.d',
+    'src/squiz_box/c/zstd.d',
 
     'src/squiz_box/box/package.d',
     'src/squiz_box/box/tar.d',
@@ -25,7 +29,7 @@ if host_machine.system() == 'windows'
     squiz_ver = ['Windows10']
 endif
 
-squiz_deps = [bz2_dep, xz_dep]
+squiz_deps = [bz2_dep, xz_dep, zstd_dep]
 
 squiz_lib = library('squiz-box', squiz_src,
     install: true,

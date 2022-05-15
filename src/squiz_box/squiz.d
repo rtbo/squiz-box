@@ -32,6 +32,7 @@ module squiz_box.squiz;
 import squiz_box.c.bzip2;
 import squiz_box.c.lzma;
 import squiz_box.c.zlib;
+import squiz_box.c.zstd;
 import squiz_box.priv;
 
 import std.datetime.systime;
@@ -728,8 +729,7 @@ class ZlibStream : SquizStream
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data is wrapped by Zlib header and trailer.
-auto deflate(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflate(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     return squiz(input, Deflate.init, chunkSize);
 }
@@ -749,8 +749,7 @@ auto deflateGz(I)(I input, GzHeader header, size_t chunkSize = defaultChunkSize)
 }
 
 /// ditto
-auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.gz;
@@ -759,8 +758,7 @@ auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data isn't wrapped by any header or trailer.
-auto deflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflateRaw(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.raw;
@@ -1776,7 +1774,7 @@ struct DecompressLzma
 
             res = lzma_raw_decoder(&stream.strm, chain.ptr);
         }
-            enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
+        enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
     }
 
     Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
@@ -1962,7 +1960,7 @@ unittest
         .join();
 
     const output = only(withDelta) // using compression parameters for decompression
-        .squiz(DecompressLzma(comp))
+    .squiz(DecompressLzma(comp))
         .join();
 
     assert(output == input);
@@ -2068,4 +2066,325 @@ unittest
     // < 0.4% compression with delta (peace of cake)
     assert(input.length > reference.length * 5);
     assert(input.length > withDelta.length * 250);
+}
+
+auto compressZstd(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, CompressZstd.init, chunkSize);
+}
+
+auto decompressZstd(I)(I input, size_t chunkSize = defaultChunkSize)
+{
+    return squiz(input, DecompressZstd.init, chunkSize);
+}
+
+class ZstdStream : SquizStream
+{
+    private ZSTD_inBuffer inBuf;
+    private ZSTD_outBuffer outBuf;
+    private size_t totalIn;
+    private size_t totalOut;
+
+    @property const(ubyte)[] input() const
+    {
+        auto ptr = cast(const(ubyte)*) inBuf.src;
+        return ptr[inBuf.pos .. inBuf.size];
+    }
+
+    @property void input(const(ubyte)[] inp)
+    {
+        totalIn += inBuf.pos;
+        inBuf.pos = 0;
+        inBuf.src = cast(const(void)*) inp.ptr;
+        inBuf.size = inp.length;
+    }
+
+    @property size_t totalInput() const
+    {
+        return totalIn + inBuf.pos;
+    }
+
+    @property inout(ubyte)[] output() inout
+    {
+        auto ptr = cast(inout(ubyte)*) outBuf.dst;
+        return ptr[outBuf.pos .. outBuf.size];
+    }
+
+    @property void output(ubyte[] outp)
+    {
+        totalOut += outBuf.pos;
+        outBuf.pos = 0;
+        outBuf.dst = cast(void*) outp.ptr;
+        outBuf.size = outp.length;
+    }
+
+    @property size_t totalOutput() const
+    {
+        return totalOut + outBuf.pos;
+    }
+
+    override string toString() const
+    {
+        import std.format : format;
+
+        string res;
+        res ~= "ZstdStream:\n";
+        res ~= "  Input:\n";
+        res ~= format!"    start 0x%016x\n"(inBuf.src);
+        res ~= format!"    pos %s\n"(inBuf.pos);
+        res ~= format!"    size %s\n"(inBuf.size);
+        res ~= format!"    total %s\n"(totalInput);
+        res ~= "  Output:\n";
+        res ~= format!"    start 0x%016x\n"(outBuf.dst);
+        res ~= format!"    pos %s\n"(outBuf.pos);
+        res ~= format!"    size %s\n"(outBuf.size);
+        res ~= format!"    total %s"(totalOutput);
+
+        return res;
+    }
+}
+
+private string zstdSetCParam(string name)
+{
+    return "if (" ~ name ~ ") " ~
+        "ZSTD_CCtx_setParameter(cctx, ZSTD_cParameter." ~ name ~ ", " ~ name ~ ");";
+}
+
+private void zstdError(size_t code, string desc)
+{
+    import std.string : fromStringz;
+
+    if (ZSTD_isError(code))
+    {
+        const msg = fromStringz(ZSTD_getErrorName(code));
+        throw new Exception((desc ~ ": " ~ msg).idup);
+    }
+}
+
+/// Zstandard is a fast compression algorithm designed for streaming.
+/// See zstd.h (enum ZSTD_cParameter) for details.
+struct CompressZstd
+{
+    static assert(isSquizAlgo!CompressZstd);
+
+    /// Common paramters.
+    /// A value of zero indicates that the default should be used.
+    int compressionLevel;
+    /// ditto
+    int windowLog;
+    /// ditto
+    int hashLog;
+    /// ditto
+    int chainLog;
+    /// ditto
+    int searchLog;
+    /// ditto
+    int minMatch;
+    /// ditto
+    int targetLength;
+    /// ditto
+    int strategy;
+
+    /// Long distance matching parameters (LDM)
+    /// Can be activated for large inputs to improve the compression ratio.
+    /// Increases memory usage and the window size
+    /// A value of zero indicate that the default should be used.
+    bool enableLongDistanceMatching;
+    /// ditto
+    int ldmHashLog;
+    /// ditto
+    int ldmMinMatch;
+    /// ditto
+    int ldmBucketSizeLog;
+    /// ditto
+    int ldmHashRateLog;
+
+    // frame parameters
+
+    /// If input data content size is known, before
+    /// start of streaming, set contentSize to its value.
+    /// It will enable the size to be written in the header
+    /// and checked after decompression.
+    ulong contentSize = ulong.max;
+    /// Include a checksum of the content in the trailer.
+    bool checksumFlag = false;
+    /// When applicable, dictionary's ID is written in the header
+    bool dictIdFlag = true;
+
+    /// Multi-threading parameters
+    int nbWorkers;
+    /// ditto
+    int jobSize;
+    /// ditto
+    int overlapLog;
+
+    static final class Stream : ZstdStream
+    {
+        private ZSTD_CStream* strm;
+    }
+
+    private void setParams(Stream stream)
+    {
+        auto cctx = cast(ZSTD_CCtx*) stream.strm;
+
+        mixin(zstdSetCParam("compressionLevel"));
+        mixin(zstdSetCParam("windowLog"));
+        mixin(zstdSetCParam("hashLog"));
+        mixin(zstdSetCParam("chainLog"));
+        mixin(zstdSetCParam("searchLog"));
+        mixin(zstdSetCParam("minMatch"));
+        mixin(zstdSetCParam("targetLength"));
+        mixin(zstdSetCParam("strategy"));
+
+        if (enableLongDistanceMatching)
+        {
+            ZSTD_CCtx_setParameter(cctx,
+                ZSTD_cParameter.enableLongDistanceMatching,
+                1
+            );
+
+            mixin(zstdSetCParam("ldmHashLog"));
+            mixin(zstdSetCParam("ldmMinMatch"));
+            mixin(zstdSetCParam("ldmBucketSizeLog"));
+            mixin(zstdSetCParam("ldmHashRateLog"));
+        }
+
+        if (contentSize != size_t.max)
+            ZSTD_CCtx_setPledgedSrcSize(cctx, contentSize);
+        if (checksumFlag)
+            ZSTD_CCtx_setParameter(
+                cctx,
+                ZSTD_cParameter.checksumFlag,
+                1
+            );
+        if (!dictIdFlag)
+            ZSTD_CCtx_setParameter(
+                cctx,
+                ZSTD_cParameter.checksumFlag,
+                0
+            );
+
+        mixin(zstdSetCParam("nbWorkers"));
+        mixin(zstdSetCParam("jobSize"));
+        mixin(zstdSetCParam("overlapLog"));
+    }
+
+    Stream initialize()
+    {
+        auto stream = new Stream;
+
+        stream.strm = ZSTD_createCStream();
+
+        setParams(stream);
+
+        return stream;
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    {
+        auto cctx = cast(ZSTD_CCtx*) stream.strm;
+        const directive = lastChunk ? ZSTD_EndDirective.end : ZSTD_EndDirective._continue;
+
+        const res = ZSTD_compressStream2(cctx, &stream.outBuf, &stream.inBuf, directive);
+
+        zstdError(res, "Could not compress data with Zstandard");
+        return cast(Flag!"streamEnded")(lastChunk && res == 0);
+    }
+
+    void reset(Stream stream)
+    {
+        auto cctx = cast(ZSTD_CCtx*) stream.strm;
+        ZSTD_CCtx_reset(cctx, ZSTD_ResetDirective.session_only);
+
+        if (contentSize != size_t.max)
+            ZSTD_CCtx_setPledgedSrcSize(cctx, contentSize);
+
+        stream.inBuf = ZSTD_inBuffer.init;
+        stream.outBuf = ZSTD_outBuffer.init;
+        stream.totalIn = 0;
+        stream.totalOut = 0;
+    }
+
+    void end(Stream stream)
+    {
+        ZSTD_freeCStream(stream.strm);
+    }
+}
+
+struct DecompressZstd
+{
+    static assert(isSquizAlgo!DecompressZstd);
+
+    int windowLogMax;
+
+    static final class Stream : ZstdStream
+    {
+        private ZSTD_DStream* strm;
+    }
+
+    private void setParams(Stream stream)
+    {
+        auto dctx = cast(ZSTD_DCtx*) stream.strm;
+
+        if (windowLogMax)
+            ZSTD_DCtx_setParameter(dctx,
+                ZSTD_dParameter.windowLogMax, windowLogMax);
+    }
+
+    Stream initialize()
+    {
+        auto stream = new Stream;
+
+        stream.strm = ZSTD_createDStream();
+
+        setParams(stream);
+
+        return stream;
+    }
+
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk")
+    {
+        const res = ZSTD_decompressStream(stream.strm, &stream.outBuf, &stream.inBuf);
+
+        zstdError(res, "Could not decompress data with Zstandard");
+        return cast(Flag!"streamEnded")(res == 0);
+    }
+
+    void reset(Stream stream)
+    {
+        auto dctx = cast(ZSTD_DCtx*) stream.strm;
+        ZSTD_DCtx_reset(dctx, ZSTD_ResetDirective.session_only);
+    }
+
+    void end(Stream stream)
+    {
+        ZSTD_freeDStream(stream.strm);
+    }
+}
+
+///
+@("Compress / Decompress Zstandard")
+unittest
+{
+    import test.util;
+    import std.array : join;
+
+    const len = 100_000;
+    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
+    const input = generateRepetitiveData(len, phrase).join();
+
+    const squized = only(input)
+        .compressZstd()
+        .join();
+
+    const output = only(squized)
+        .decompressZstd()
+        .join();
+
+    assert(squized.length < input.length);
+    assert(output == input);
+
+    // for such long and repetitive data, ratio is around 0.047%
+    const ratio = cast(double) squized.length / cast(double) input.length;
+    assert(ratio < 0.0005);
 }

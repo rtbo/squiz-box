@@ -48,6 +48,7 @@ be used inside an externally defined format (e.g. zip, 7z, ...).
 | Bzip2   | `CompressBzip2`, `DecompressBzip2` | Bzip2           |
 | LZMA1 (legacy compression) | `CompressLzma`, `DecompressLzma` | Xz, Lzma (legacy format), Raw |
 | LZMA (aka. LZMA2)   | `CompressLzma`, `DecompressLzma` | Xz, Raw |
+| Zstandard | `CompressZstd`, `DecompressZstd` | Zstandard |
 
 In addition, the LZMA1 and LZMA compression also support additional filters
 that transorm the data before the compression stage in order to increase
@@ -80,7 +81,7 @@ so it is possible to create or extract archives of dozens of giga-bytes with
 minimal memory foot print.
 
 The following formats are supported:
-- Tar
+- Tar (including `.tar.gz`, `.tar.bz2`, `.tar.xz`)
 - Zip
 
 There is also WIP for 7z.
@@ -191,8 +192,8 @@ The following code gives the spirit of it.
 ```d
 import squiz_box;
 
-// Deflate is a good fit for low latency streaming
-auto algo = Deflate.init;
+// Zstandard is a good fit for low latency streaming
+auto algo = CompressZstd.init;
 auto stream = algo.initialize();
 
 // repeat for as many chunks of memory as necessary
@@ -208,6 +209,5 @@ algo.reset(stream);
 // more streaming...
 
 // finally we can release the resources
-// (most of which are allocated with GC)
 algo.end(stream);
 ```

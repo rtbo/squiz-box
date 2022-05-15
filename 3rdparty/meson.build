@@ -21,3 +21,13 @@ if not xz_dep.found()
     message('Will build liblzma from source')
     subdir('xz-5.2.5')
 endif
+
+zstd_dep = dependency('libzstd',
+    version: '>=1.5.2',
+    method: 'pkg-config',
+    required: false,
+)
+if not zstd_dep.found()
+    message('Will build libzstd from source')
+    subdir('zstd-1.5.2')
+endif

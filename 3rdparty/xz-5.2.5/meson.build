@@ -175,8 +175,6 @@ xz_conf = configure_file(
     configuration: xz_conf_data,
 )
 
-thread_dep = dependency('threads')
-
 xz_defs = ['-DHAVE_CONFIG_H']
 if host_machine.endian() == 'big'
     xz_defs += ['-DWORDS_BIGENDIAN']
