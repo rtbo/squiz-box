@@ -637,3 +637,67 @@ public:
         prime();
     }
 }
+
+// copy of std.range.generate with phobos issue 19587 fixed
+// see phobos#8453
+auto hatch(alias fun)()
+{
+    return Hatch!(fun)();
+}
+
+struct Hatch(alias fun)
+{
+    import std.range : isInputRange;
+    import std.traits : FunctionAttribute, functionAttributes, ReturnType;
+
+    static assert(isInputRange!Hatch);
+
+private:
+
+    enum returnByRef_ = (functionAttributes!fun & FunctionAttribute.ref_) ? true : false;
+    static if (returnByRef_)
+        ReturnType!fun* elem_;
+    else
+        ReturnType!fun elem_;
+
+    bool valid_;
+
+public:
+    /// Range primitives
+    enum empty = false;
+
+    static if (returnByRef_)
+    {
+        /// ditto
+        ref front() @property
+        {
+            if (!valid_)
+            {
+                elem_ = &fun();
+                valid_ = true;
+            }
+            return *elem_;
+        }
+    }
+    else
+    {
+        /// ditto
+        auto front() @property
+        {
+            if (!valid_)
+            {
+                elem_ = fun();
+                valid_ = true;
+            }
+            return elem_;
+        }
+    }
+    /// ditto
+    void popFront()
+    {
+        // popFront called without calling front
+        if (!valid_)
+            cast(void) fun();
+        valid_ = false;
+    }
+}

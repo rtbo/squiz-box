@@ -9,6 +9,7 @@ import std.exception;
 import std.range;
 
 public import squiz_box.box.tar;
+public import squiz_box.box.z7;
 public import squiz_box.box.zip;
 
 /// Static check that a type is an InputRange of ArchiveCreateEntry

@@ -356,3 +356,12 @@ unittest
 
     testExtractedFiles(dm, Yes.mode666);
 }
+
+@("Extract 7z")
+unittest
+{
+    import std.stdio : File;
+
+    const archive = testPath("data/archive.7z");
+    File(archive, "rb").read7zArchive();
+}
