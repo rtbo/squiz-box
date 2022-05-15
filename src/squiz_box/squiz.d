@@ -728,8 +728,7 @@ class ZlibStream : SquizStream
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data is wrapped by Zlib header and trailer.
-auto deflate(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflate(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     return squiz(input, Deflate.init, chunkSize);
 }
@@ -749,8 +748,7 @@ auto deflateGz(I)(I input, GzHeader header, size_t chunkSize = defaultChunkSize)
 }
 
 /// ditto
-auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.gz;
@@ -759,8 +757,7 @@ auto deflateGz(I)(I input, size_t chunkSize = defaultChunkSize)
 
 /// Returns an InputRange containing the input data processed through Zlib's deflate algorithm.
 /// The produced stream of data isn't wrapped by any header or trailer.
-auto deflateRaw(I)(I input, size_t chunkSize = defaultChunkSize)
-        if (isByteRange!I)
+auto deflateRaw(I)(I input, size_t chunkSize = defaultChunkSize) if (isByteRange!I)
 {
     auto algo = Deflate.init;
     algo.format = ZlibFormat.raw;
@@ -1776,7 +1773,7 @@ struct DecompressLzma
 
             res = lzma_raw_decoder(&stream.strm, chain.ptr);
         }
-            enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
+        enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
     }
 
     Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
@@ -1962,7 +1959,7 @@ unittest
         .join();
 
     const output = only(withDelta) // using compression parameters for decompression
-        .squiz(DecompressLzma(comp))
+    .squiz(DecompressLzma(comp))
         .join();
 
     assert(output == input);

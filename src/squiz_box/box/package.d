@@ -252,7 +252,7 @@ interface ArchiveExtractEntry : ArchiveEntry
 /// archiveBase must be a parent path from filename,
 /// such as the the path of the entry is filename, relative to archiveBase.
 /// prefix is prepended to the name of the file in the archive.
-ArchiveCreateEntry fileEntry(string filename, string archiveBase, string prefix=null)
+ArchiveCreateEntry fileEntry(string filename, string archiveBase, string prefix = null)
 {
     import std.path : absolutePath, buildNormalizedPath, relativePath;
     import std.string : startsWith;
@@ -319,6 +319,7 @@ class FileArchiveEntry : ArchiveCreateEntry
         version (Posix)
         {
             import std.file : isSymlink, readLink;
+
             if (isSymlink(filePath))
                 return readLink(filePath);
         }
