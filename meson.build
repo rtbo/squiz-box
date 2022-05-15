@@ -2,16 +2,10 @@ project('squiz-box', ['c', 'd'],
     version: '0.1.0',
 )
 
-subdir('3rdparty')
 
-zstd_dep = dependency('libzstd',
-    method: 'pkg-config',
-    version: '>= 1.4.5',
-)
-if not zstd_dep.found()
-    zstd_proj = subproject('zstd')
-    zstd_dep = zstd_proj.get_variable('libzstd_dep')
-endif
+thread_dep = dependency('threads')
+
+subdir('3rdparty')
 
 squiz_src = files([
     'src/squiz_box/c/bzip2.d',
