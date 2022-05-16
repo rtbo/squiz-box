@@ -149,9 +149,9 @@ enum print7zDecode = true;
 
 private template parse(T)
 {
-    T parse(C)(C cursor)
+    T parse(C, Args...)(C cursor, Args args)
     {
-        auto d = T.read(cursor);
+        auto d = T.read(cursor, args);
         static if (print7zDecode)
         {
             writefln!"Decoded %s"(d);
@@ -408,7 +408,7 @@ private enum PropId : ubyte
 
 PropId readPropId(C)(C cursor)
 {
-    return cast(PropId)cursor.get;
+    return cast(PropId) cursor.get;
 }
 
 private string propIdName(PropId id)
@@ -562,6 +562,12 @@ private struct Folder
         ulong outIndex;
     }
 
+    static struct SubStream
+    {
+        ulong size;
+        uint crc;
+    }
+
     CodecInfo[] codecInfos;
     size_t numInStreams;
     size_t numOutStreams;
@@ -569,6 +575,9 @@ private struct Folder
     ulong[] indices;
     ulong[] unpackSizes;
     uint unpackCrc;
+
+    // substream info
+    SubStream[] subStreams;
 
     static Folder read(C)(C cursor)
     {
@@ -640,6 +649,52 @@ private struct Folder
             return squizAlgo(Inflate(ZlibFormat.raw));
 
         return null;
+    }
+
+    size_t findInBindPair(size_t ind) const
+    {
+        foreach (i, bp; bindPairs)
+        {
+            if (bp.inIndex == ind)
+                return i;
+        }
+        return size_t.max - 1;
+    }
+
+    size_t findOutBindPair(size_t ind) const
+    {
+        foreach (i, bp; bindPairs)
+        {
+            if (bp.outIndex == ind)
+                return i;
+        }
+        return size_t.max;
+    }
+
+    size_t unpackSize() const
+    {
+        if (unpackSizes.length == 0)
+            return 0;
+        foreach (i; iota(unpackSizes.length, -1, -1))
+        {
+            if (findOutBindPair(i) == size_t.max)
+                return unpackSizes[i];
+        }
+        return unpackSizes[$ - 1];
+    }
+
+    @property bool crcDefined() const
+    {
+        return unpackCrc != 0;
+    }
+
+    @property size_t numCrcUndefined() const
+    {
+        import std.algorithm : count;
+
+        if (subStreams.length <= 1)
+            return unpackCrc == 0 ? 1 : 0;
+        return subStreams.count!(ss => ss.crc == 0);
     }
 }
 
@@ -719,10 +774,13 @@ private struct StreamsInfo
             switch (nextId)
             {
             case PropId.packInfo:
-                res.packInfo = parse!PackInfo(cursor);
+                res.packInfo = cursor.parse!PackInfo();
                 break;
             case PropId.unpackInfo:
-                res.codersInfo = parse!CodersInfo(cursor);
+                res.codersInfo = cursor.parse!CodersInfo();
+                break;
+            case PropId.subStreamsInfo:
+                SubStreamsInfo.read(cursor, res.codersInfo.get.folders);
                 break;
             default:
                 unexpectedPropId(cursor.name, nextId, "StreamInfo");
@@ -736,16 +794,84 @@ private struct StreamsInfo
 
 private struct SubStreamsInfo
 {
-    static SubStreamsInfo read(C)(C cursor)
+    // SubStreamsInfo sets it state into Folder.subStreams
+    static void read(C)(C cursor, Folder[] folders)
     {
+        auto propId = cursor.readPropId();
+        if (propId == PropId.numUnpackStream)
+        {
+            writefln("read numUnPackStream at %02x", cursor.pos);
+            foreach (ref f; folders)
+            {
+                const num = cursor.readUint64();
+                writeln("  ", num);
+                f.subStreams.length = 3;
+            }
+            propId = cursor.readPropId();
+        }
+        else
+        {
+            foreach (ref f; folders)
+                f.subStreams = [ Folder.SubStream(f.unpackSize, f.unpackCrc) ];
+        }
+        if (propId == PropId.size)
+        {
+            writefln("read size at %02x", cursor.pos);
+            foreach (ref f; folders)
+            {
+                ulong allButLast = 0;
+                foreach (ref s; f.subStreams[0 .. $-1])
+                {
+                    const pos = cursor.pos;
+                    const size = cursor.readUint64();
+                    writefln("  %02x: %d", pos, size);
+                    s.size = size;
+                    allButLast += size;
+                }
+                f.subStreams[$-1].size = f.unpackSize() - allButLast;
+            }
+            const pos = cursor.pos;
+            propId = cursor.readPropId();
+            writefln("0x%02x: %s", pos, propId);
+        }
+        if (propId == PropId.crc)
+        {
+            import std.algorithm : map, sum;
 
+            writefln!"read CRC at %02x"(cursor.pos);
+
+            const numDigest = folders.map!(f => f.numCrcUndefined()).sum();
+            const digestDefined = BooleanList.read(cursor, numDigest, Yes.checkAllDefined);
+
+            writefln!"  num digest = %s"(numDigest);
+            writefln!"  digest defined = %s"(digestDefined);
+
+            size_t i;
+            foreach (ref f; folders)
+            {
+                foreach (ref ss; f.subStreams)
+                {
+                    if (ss.crc == 0)
+                    {
+                        if (digestDefined[i++])
+                        {
+                            ss.crc = cursor.getValue!uint();
+                            writefln!"  crc = %08x"(ss.crc);
+                        }
+                    }
+                }
+            }
+            propId = cursor.readPropId();
+        }
+
+        if (propId != PropId.end)
+            unexpectedPropId(cursor.name, propId, "SubStreamsInfo");
     }
 }
 
 private struct Header
 {
     StreamsInfo mainStreams;
-
 
     static Header read(DB, C)(DB dbCursor, C cursor, ulong packedStreamStart)
     {
@@ -800,11 +926,23 @@ private struct Header
 
             if (folder.unpackCrc)
             {
-                uint crc = crc32(0, decompressed.ptr, cast(uint)decompressed.length);
+                uint crc = crc32(0, decompressed.ptr, cast(uint) decompressed.length);
                 enforce(folder.unpackCrc == crc, "Header CRC check failed");
             }
 
             headerBuf ~= decompressed;
+        }
+
+        import std.algorithm : min;
+
+        size_t pos = 0;
+        writefln!"        %(%02x  %)"(iota(0, 16));
+        writeln();
+        while (pos < headerBuf.length)
+        {
+            const len = min(16, headerBuf.length - pos);
+            writefln!"%04x    %(%02x  %)"(pos, headerBuf[pos .. pos + len]);
+            pos += len;
         }
 
         auto hc = new ArrayCursor(headerBuf, cursor.name);
