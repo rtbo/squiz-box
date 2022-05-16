@@ -1,5 +1,5 @@
 {
-	"name": "test_dub",
+	"name": "dub_test",
     "dependencies": {
         "squiz-box": {
             "path": "../.."

@@ -49,4 +49,4 @@ jobs:
 
       - name: Test Dub package
         run: dub run --arch=x86_64
-        working-directory: .github/test_dub
+        working-directory: .github/dub_test

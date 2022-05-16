@@ -13,11 +13,6 @@
         "$PACKAGE_DIR/windows-x64/lzma.lib",
         "$PACKAGE_DIR/windows-x64/zstd.lib"
     ],
-    "dflags-windows-x86_64": [
-        "$PACKAGE_DIR/windows-x64/bz2.lib",
-        "$PACKAGE_DIR/windows-x64/lzma.lib",
-        "$PACKAGE_DIR/windows-x64/zstd.lib"
-    ],
 
     "versions-windows": [ "Windows10" ],
 
