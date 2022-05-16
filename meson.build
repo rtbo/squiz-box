@@ -1,5 +1,6 @@
 project('squiz-box', ['c', 'd'],
     version: '0.1.0',
+    default_options: ['default_library=static'],
 )
 
 
