@@ -406,6 +406,11 @@ private enum PropId : ubyte
 }
 // dfmt on
 
+PropId readPropId(C)(C cursor)
+{
+    return cast(PropId)cursor.get;
+}
+
 private string propIdName(PropId id)
 {
     return id > PropId.dummy ?
@@ -729,8 +734,19 @@ private struct StreamsInfo
     }
 }
 
+private struct SubStreamsInfo
+{
+    static SubStreamsInfo read(C)(C cursor)
+    {
+
+    }
+}
+
 private struct Header
 {
+    StreamsInfo mainStreams;
+
+
     static Header read(DB, C)(DB dbCursor, C cursor, ulong packedStreamStart)
     {
         const propId = cast(PropId) dbCursor.get;
@@ -744,8 +760,10 @@ private struct Header
 
     static Header readHeader(C)(C cursor)
     {
-
-        return Header.init;
+        Header res;
+        enforceGetPropId(cursor, PropId.mainStreamsInfo, "Header database");
+        res.mainStreams = cursor.parse!StreamsInfo();
+        return res;
     }
 
     static Header readEncodedHeader(DB, C)(DB dbCursor, C cursor, ulong packedStreamStart)
@@ -789,7 +807,8 @@ private struct Header
             headerBuf ~= decompressed;
         }
 
-        auto hc = new ArrayCursor(headerBuf);
+        auto hc = new ArrayCursor(headerBuf, cursor.name);
+        hc.enforceGetPropId(PropId.header, "Header decoded database");
         return readHeader(hc);
     }
 }
