@@ -68,7 +68,7 @@ static assert(isByteRange!ByteRange);
 /// a decompression algorithm.
 /// I.e. the data was not compressed with the corresponding algorithm
 /// or the wrapping format is not the one expected.
-class DataException : Exception
+@safe class DataException : Exception
 {
     mixin basicExceptionCtors!();
 }
@@ -99,7 +99,7 @@ interface SquizAlgo
 {
     /// Initialize a new stream for processing data
     /// with this algorithm.
-    SquizStream initialize();
+    SquizStream initialize() @safe;
 
     /// Processes the input stream data to produce output stream data.
     /// lastChunk indicates that the input chunk in stream is the last one.
@@ -107,24 +107,24 @@ interface SquizAlgo
     /// the work.
     /// Returned value indicates that there won't be more output generated
     /// than the one in stream.output
-    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk);
+    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk) @safe;
 
     /// Reset the state of this stream, yet reusing the same
     /// allocating resources, in order to start processing
     /// another data stream.
-    void reset(SquizStream stream);
+    void reset(SquizStream stream) @safe;
 
     /// Release the resources used by this stream.
     /// Most of the memory (if not all) used by algorithm
     /// is allocating with the garbage collector, so not
     /// calling this function has little consequence (if not none).
-    void end(SquizStream stream);
+    void end(SquizStream stream) @safe;
 }
 
 static assert(isSquizAlgo!SquizAlgo);
 
 /// Get a runtime type for the provided algorithm
-SquizAlgo squizAlgo(A)(A algo) if (isSquizAlgo!A)
+SquizAlgo squizAlgo(A)(A algo) @safe if (isSquizAlgo!A)
 {
     return new CSquizAlgo!A(algo);
 }
@@ -155,7 +155,7 @@ private class CSquizAlgo(A) : SquizAlgo
 
     A algo;
 
-    private this(A algo)
+    private this(A algo) @safe
     {
         this.algo = algo;
     }
@@ -167,22 +167,22 @@ private class CSquizAlgo(A) : SquizAlgo
         return s;
     }
 
-    SquizStream initialize()
+    SquizStream initialize() @safe
     {
         return algo.initialize();
     }
 
-    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk) @safe
     {
         return algo.process(checkStream(stream), lastChunk);
     }
 
-    void reset(SquizStream stream)
+    void reset(SquizStream stream) @safe
     {
         return algo.reset(checkStream(stream));
     }
 
-    void end(SquizStream stream)
+    void end(SquizStream stream) @safe
     {
         return algo.end(checkStream(stream));
     }
@@ -197,23 +197,23 @@ interface SquizStream
     /// Input data for the algorithm
     /// The slice is reduced by its begining as the processing moves on.
     /// Must be refilled when empty before calling the algorithm `process` method.
-    @property const(ubyte)[] input() const;
+    @property const(ubyte)[] input() const @safe;
     /// Ditto
-    @property void input(const(ubyte)[] inp);
+    @property void input(const(ubyte)[] inp) @safe;
 
     /// How many bytes read since the start of the stream processing.
-    @property size_t totalInput() const;
+    @property size_t totalInput() const @safe;
 
     /// Output buffer for the algorithm to write to.
     /// This is NOT the data ready after process, but where the
     /// algorithm must write next.
     /// after a call to process, the slice is reduced by its beginning,
     /// and the data written is therefore the one before the slice.
-    @property inout(ubyte)[] output() inout;
-    @property void output(ubyte[] outp);
+    @property inout(ubyte)[] output() inout @safe;
+    @property void output(ubyte[] outp) @safe;
 
     /// How many bytes written since the start of the stream processing.
-    @property size_t totalOutput() const;
+    @property size_t totalOutput() const @safe;
 }
 
 private template isZlibLikeStream(S)
@@ -226,34 +226,34 @@ private template isZlibLikeStream(S)
             }));
 }
 
-private mixin template StreamImpl(S) if (isZlibLikeStream!S)
+private mixin template ZlibLikeStreamImpl(S) if (isZlibLikeStream!S)
 {
     private S strm;
 
-    @property const(ubyte)[] input() const
+    @property const(ubyte)[] input() const @trusted
     {
         return strm.next_in[0 .. strm.avail_in];
     }
 
-    @property void input(const(ubyte)[] inp)
+    @property void input(const(ubyte)[] inp) @trusted
     {
         strm.next_in = inp.ptr;
         strm.avail_in = cast(typeof(strm.avail_in)) inp.length;
     }
 
-    @property inout(ubyte)[] output() inout
+    @property inout(ubyte)[] output() inout @trusted
     {
         return strm.next_out[0 .. strm.avail_out];
     }
 
-    @property void output(ubyte[] outp)
+    @property void output(ubyte[] outp) @trusted
     {
         strm.next_out = outp.ptr;
         strm.avail_out = cast(typeof(strm.avail_out)) outp.length;
     }
 }
 
-mixin template StreamTotalInOutImpl()
+mixin template ZlibLikeTotalInOutImpl()
 {
     @property size_t totalInput() const
     {
@@ -454,32 +454,32 @@ final class CopyStream : SquizStream
     private ubyte[] _outp;
     size_t _totalOut;
 
-    @property const(ubyte)[] input() const
+    @property const(ubyte)[] input() const @safe
     {
         return _inp;
     }
 
-    @property void input(const(ubyte)[] inp)
+    @property void input(const(ubyte)[] inp) @safe
     {
         _inp = inp;
     }
 
-    @property size_t totalInput() const
+    @property size_t totalInput() const @safe
     {
         return _totalIn;
     }
 
-    @property inout(ubyte)[] output() inout
+    @property inout(ubyte)[] output() inout @safe
     {
         return _outp;
     }
 
-    @property void output(ubyte[] outp)
+    @property void output(ubyte[] outp) @safe
     {
         _outp = outp;
     }
 
-    @property size_t totalOutput() const
+    @property size_t totalOutput() const @safe
     {
         return _totalOut;
     }
@@ -490,12 +490,12 @@ struct Copy
 {
     static assert(isSquizAlgo!Copy);
 
-    CopyStream initialize()
+    CopyStream initialize() @safe
     {
         return new CopyStream;
     }
 
-    Flag!"streamEnded" process(CopyStream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(CopyStream stream, Flag!"lastChunk" lastChunk) @safe
     {
         import std.algorithm : min;
 
@@ -511,7 +511,7 @@ struct Copy
         return cast(Flag!"streamEnded")(lastChunk && stream._inp.length == 0);
     }
 
-    void reset(CopyStream stream)
+    void reset(CopyStream stream) @safe
     {
         stream._inp = null;
         stream._outp = null;
@@ -519,7 +519,7 @@ struct Copy
         stream._totalOut = 0;
     }
 
-    void end(CopyStream)
+    void end(CopyStream) @safe
     {
     }
 }
@@ -565,7 +565,7 @@ enum ZlibFormat
     raw,
 }
 
-private size_t strnlen(const(byte)* str, size_t maxlen)
+private size_t strnlen(const(byte)* str, size_t maxlen) @system
 {
     if (!str)
         return 0;
@@ -627,13 +627,13 @@ struct GzHeader
     private c_ulong _mtime;
 
     /// Modification time
-    @property SysTime mtime() const
+    @property SysTime mtime() const @safe
     {
         return SysTime(unixTimeToStdTime(_mtime));
     }
 
     /// ditto
-    @property void mtime(SysTime time)
+    @property void mtime(SysTime time) @safe
     {
         _mtime = stdTimeToUnixTime(time.stdTime);
     }
@@ -649,7 +649,7 @@ struct GzHeader
 
     private enum bufSize = 256;
 
-    private string fromLatin1z(const(byte)* ptr)
+    private string fromLatin1z(const(byte)* ptr) @system
     {
         // ptr points to a buffer of bufSize characters.
         // End of string is a null character or end of buffer.
@@ -664,7 +664,7 @@ struct GzHeader
         return res;
     }
 
-    private byte* toLatin1z(string str)
+    private byte* toLatin1z(string str) @trusted
     {
         import std.encoding : Latin1Char, transcode;
 
@@ -674,7 +674,7 @@ struct GzHeader
         return res.ptr;
     }
 
-    private this(gz_headerp gzh)
+    private this(gz_headerp gzh) @system
     {
         text = gzh.text ? Yes.text : No.text;
         _mtime = gzh.time;
@@ -685,7 +685,7 @@ struct GzHeader
             comment = fromLatin1z(gzh.comment);
     }
 
-    private gz_headerp toZlib()
+    private gz_headerp toZlib() @safe
     {
         import core.stdc.config : c_long;
 
@@ -717,10 +717,10 @@ Flag!"text" isText(const(ubyte)[] data)
 
 class ZlibStream : SquizStream
 {
-    mixin StreamImpl!z_stream;
-    mixin StreamTotalInOutImpl!();
+    mixin ZlibLikeStreamImpl!z_stream;
+    mixin ZlibLikeTotalInOutImpl!();
 
-    private this()
+    private this() @safe
     {
         strm.zalloc = &(gcAlloc!uint);
         strm.zfree = &gcFree;
@@ -796,7 +796,7 @@ struct Deflate
     {
     }
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         assert(
             9 <= windowBits && windowBits <= 15,
@@ -819,10 +819,11 @@ struct Deflate
 
         auto stream = new Stream();
 
-        const res = deflateInit2(
-            &stream.strm, level, Z_DEFLATED,
-            wb, memLevel, cast(int) strategy,
-        );
+        const res = (() @trusted => deflateInit2(
+                &stream.strm, level, Z_DEFLATED,
+                wb, memLevel, cast(int) strategy,
+        ))();
+
         enforce(
             res == Z_OK,
             "Could not initialize Zlib deflate stream: " ~ zResultToString(res)
@@ -831,16 +832,16 @@ struct Deflate
         if (format == ZlibFormat.gz && !gzHeader.isNull)
         {
             auto head = gzHeader.get.toZlib();
-            deflateSetHeader(&stream.strm, head);
+            (() @trusted => deflateSetHeader(&stream.strm, head))();
         }
 
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
     {
         const flush = lastChunk ? Z_FINISH : Z_NO_FLUSH;
-        const res = squiz_box.c.zlib.deflate(&stream.strm, flush);
+        const res = (() @trusted => squiz_box.c.zlib.deflate(&stream.strm, flush))();
 
         enforce(
             res == Z_OK || res == Z_STREAM_END,
@@ -850,12 +851,12 @@ struct Deflate
         return cast(Flag!"streamEnded")(res == Z_STREAM_END);
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @trusted
     {
         deflateReset(&stream.strm);
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         deflateEnd(&stream.strm);
     }
@@ -922,7 +923,7 @@ struct Inflate
         private GzHeaderDg dg;
         private bool dgCalled;
 
-        this(GzHeaderDg dg)
+        this(GzHeaderDg dg) @safe
         {
             gzh.name = &nameBuf[0];
             gzh.name_max = cast(uint) nameBuf.length;
@@ -938,7 +939,7 @@ struct Inflate
         Gzh gzh;
     }
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         assert(
             (windowBits == 0 && format == ZlibFormat.zlib) ||
@@ -963,7 +964,7 @@ struct Inflate
 
         auto stream = new Stream();
 
-        const res = inflateInit2(&stream.strm, wb);
+        const res = (() @trusted => inflateInit2(&stream.strm, wb))();
 
         enforce(
             res == Z_OK,
@@ -973,7 +974,7 @@ struct Inflate
         if (gzHeaderDg)
         {
             stream.gzh = new Gzh(gzHeaderDg);
-            inflateGetHeader(&stream.strm, &stream.gzh.gzh);
+            (() @trusted => inflateGetHeader(&stream.strm, &stream.gzh.gzh))();
         }
 
         return stream;
@@ -981,7 +982,7 @@ struct Inflate
 
     package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ )
     {
-        const res = squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH);
+        const res = (() @trusted => squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH))();
         //
         if (res == Z_DATA_ERROR)
             throw new DataException("Improper data given to deflate");
@@ -994,19 +995,20 @@ struct Inflate
         auto gzh = stream.gzh;
         if (gzh && !gzh.dgCalled && gzh.gzh.done)
         {
-            gzh.dg(GzHeader(&gzh.gzh));
+            auto head = (() @trusted => GzHeader(&gzh.gzh))();
+            gzh.dg(head);
             gzh.dgCalled = true;
         }
 
         return cast(Flag!"streamEnded")(res == Z_STREAM_END);
     }
 
-    package void reset(Stream stream)
+    package void reset(Stream stream) @trusted
     {
         inflateReset(&stream.strm);
     }
 
-    package void end(Stream stream)
+    package void end(Stream stream) @trusted
     {
         inflateEnd(&stream.strm);
     }
@@ -1107,7 +1109,7 @@ unittest
     assert(output == input);
 }
 
-package string zResultToString(int res)
+package string zResultToString(int res) @safe pure nothrow @nogc
 {
     switch (res)
     {
@@ -1134,7 +1136,7 @@ package string zResultToString(int res)
     }
 }
 
-package string zFlushToString(int flush)
+package string zFlushToString(int flush) @safe pure nothrow @nogc
 {
     switch (flush)
     {
@@ -1166,9 +1168,9 @@ auto compressBzip2(I)(I input, size_t chunkSize = defaultChunkSize)
 
 final class Bz2Stream : SquizStream
 {
-    mixin StreamImpl!(bz_stream);
+    mixin ZlibLikeStreamImpl!(bz_stream);
 
-    @property size_t totalInput() const
+    @property size_t totalInput() const @safe
     {
         ulong hi = strm.total_in_hi32;
         return cast(size_t)(
@@ -1176,7 +1178,7 @@ final class Bz2Stream : SquizStream
         );
     }
 
-    @property size_t totalOutput() const
+    @property size_t totalOutput() const @safe
     {
         ulong hi = strm.total_out_hi32;
         return cast(size_t)(
@@ -1184,7 +1186,7 @@ final class Bz2Stream : SquizStream
         );
     }
 
-    this()
+    this() @safe
     {
         strm.bzalloc = &(gcAlloc!int);
         strm.bzfree = &gcFree;
@@ -1217,13 +1219,13 @@ struct CompressBzip2
 
     alias Stream = Bz2Stream;
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         auto stream = new Stream;
 
-        const res = BZ2_bzCompressInit(
-            &stream.strm, blockSize100k, verbosity, workFactor,
-        );
+        const res = (() @trusted => BZ2_bzCompressInit(
+                &stream.strm, blockSize100k, verbosity, workFactor,
+        ))();
         enforce(
             res == BZ_OK,
             "Could not initialize Bzip2 compressor: " ~ bzResultToString(res)
@@ -1231,10 +1233,10 @@ struct CompressBzip2
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
     {
         const action = lastChunk ? BZ_FINISH : BZ_RUN;
-        const res = BZ2_bzCompress(&stream.strm, action);
+        const res = (() @trusted => BZ2_bzCompress(&stream.strm, action))();
 
         if (res == BZ_STREAM_END)
             return Yes.streamEnded;
@@ -1248,24 +1250,24 @@ struct CompressBzip2
         return No.streamEnded;
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @safe
     {
-        BZ2_bzCompressEnd(&stream.strm);
+        (() @trusted => BZ2_bzCompressEnd(&stream.strm))();
 
         stream.strm = bz_stream.init;
         stream.strm.bzalloc = &(gcAlloc!int);
         stream.strm.bzfree = &gcFree;
 
-        const res = BZ2_bzCompressInit(
-            &stream.strm, blockSize100k, verbosity, workFactor,
-        );
+        const res = (() @trusted => BZ2_bzCompressInit(
+                &stream.strm, blockSize100k, verbosity, workFactor,
+        ))();
         enforce(
             res == BZ_OK,
             "Could not initialize Bzip2 compressor: " ~ bzResultToString(res)
         );
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         BZ2_bzCompressEnd(&stream.strm);
     }
@@ -1296,13 +1298,13 @@ struct DecompressBzip2
 
     alias Stream = Bz2Stream;
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         auto stream = new Stream;
 
-        const res = BZ2_bzDecompressInit(
-            &stream.strm, verbosity, small ? 1 : 0,
-        );
+        const res = (() @trusted => BZ2_bzDecompressInit(
+                &stream.strm, verbosity, small ? 1 : 0,
+        ))();
         enforce(
             res == BZ_OK,
             "Could not initialize Bzip2 decompressor: " ~ bzResultToString(res)
@@ -1310,9 +1312,9 @@ struct DecompressBzip2
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk") @safe
     {
-        const res = BZ2_bzDecompress(&stream.strm);
+        const res = (() @trusted => BZ2_bzDecompress(&stream.strm))();
 
         if (res == BZ_DATA_ERROR)
             throw new DataException("Input data was not compressed with Bzip2");
@@ -1325,24 +1327,24 @@ struct DecompressBzip2
         return cast(Flag!"streamEnded")(res == BZ_STREAM_END);
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @safe
     {
-        BZ2_bzDecompressEnd(&stream.strm);
+        (() @trusted => BZ2_bzDecompressEnd(&stream.strm))();
 
         stream.strm = bz_stream.init;
         stream.strm.bzalloc = &(gcAlloc!int);
         stream.strm.bzfree = &gcFree;
 
-        const res = BZ2_bzDecompressInit(
-            &stream.strm, verbosity, small ? 1 : 0,
-        );
+        const res = (() @trusted => BZ2_bzDecompressInit(
+                &stream.strm, verbosity, small ? 1 : 0,
+        ))();
         enforce(
             res == BZ_OK,
             "Could not initialize Bzip2 decompressor: " ~ bzResultToString(res)
         );
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         BZ2_bzDecompressEnd(&stream.strm);
     }
@@ -1375,7 +1377,7 @@ unittest
     assert(ratio < 0.002);
 }
 
-private string bzActionToString(int action)
+private string bzActionToString(int action) @safe pure nothrow @nogc
 {
     switch (action)
     {
@@ -1390,7 +1392,7 @@ private string bzActionToString(int action)
     }
 }
 
-private string bzResultToString(int res)
+private string bzResultToString(int res) @safe pure nothrow @nogc
 {
     switch (res)
     {
@@ -1429,22 +1431,23 @@ private string bzResultToString(int res)
 
 final class LzmaStream : SquizStream
 {
-    mixin StreamImpl!(lzma_stream);
-    mixin StreamTotalInOutImpl!();
+    mixin ZlibLikeStreamImpl!(lzma_stream);
+    mixin ZlibLikeTotalInOutImpl!();
 
     private lzma_allocator alloc;
     private lzma_options_delta optsDelta;
     private lzma_options_lzma optsLzma;
     private lzma_filter[] filterChain;
 
-    this()
+    this() @safe
     {
         alloc.alloc = &(gcAlloc!size_t);
         alloc.free = &gcFree;
         strm.allocator = &alloc;
     }
 
-    private lzma_filter[] buildFilterChain(LzmaFormat format, LzmaFilter[] filters, uint preset, uint deltaDist)
+    private lzma_filter[] buildFilterChain(LzmaFormat format, LzmaFilter[] filters,
+        uint preset, uint deltaDist) @safe
     {
         lzma_filter[] res;
         foreach (f; filters)
@@ -1480,7 +1483,7 @@ final class LzmaStream : SquizStream
 
         if (format != LzmaFormat.rawCopy)
         {
-            lzma_lzma_preset(&optsLzma, preset);
+            (() @trusted => lzma_lzma_preset(&optsLzma, preset))();
             const compFilter = format.isLegacy ? LZMA_FILTER_LZMA1 : LZMA_FILTER_LZMA2;
             res ~= lzma_filter(compFilter, cast(void*)&optsLzma);
         }
@@ -1516,13 +1519,13 @@ enum LzmaFormat
 }
 
 /// Whether this is a legacy format
-bool isLegacy(LzmaFormat format)
+bool isLegacy(LzmaFormat format) @safe pure nothrow @nogc
 {
     return format == LzmaFormat.legacy || format == LzmaFormat.rawLegacy;
 }
 
 /// Whether this is a raw format
-bool isRaw(LzmaFormat format)
+bool isRaw(LzmaFormat format) @safe pure nothrow @nogc
 {
     return cast(int) format >= cast(int) LzmaFormat.raw;
 }
@@ -1574,7 +1577,7 @@ enum LzmaCheck
     sha256,
 }
 
-private lzma_check toLzma(LzmaCheck check)
+private lzma_check toLzma(LzmaCheck check) @safe pure nothrow @nogc
 {
     final switch (check)
     {
@@ -1634,7 +1637,7 @@ struct CompressLzma
 
     alias Stream = LzmaStream;
 
-    private void initStream(Stream stream)
+    private void initStream(Stream stream) @trusted
     {
         uint pres = preset;
         if (extreme)
@@ -1663,19 +1666,19 @@ struct CompressLzma
         enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
     }
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         auto stream = new LzmaStream;
         initStream(stream);
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
     {
         return lzmaCode(stream, lastChunk);
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @safe
     {
         // Lzma supports reset out of the box by recalling initialization
         // function without calling lzma_end.
@@ -1683,7 +1686,7 @@ struct CompressLzma
         initStream(stream);
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         lzma_end(&stream.strm);
     }
@@ -1730,7 +1733,7 @@ struct DecompressLzma
 
     alias Stream = LzmaStream;
 
-    this(LzmaFormat format)
+    this(LzmaFormat format) @safe
     {
         this.format = format;
     }
@@ -1738,7 +1741,7 @@ struct DecompressLzma
     /// convenience constructor to copy parameters of the compression
     /// for the decompression. Especially useful for the raw decompression,
     /// to ensure that the parameters fit the ones used for compression.
-    this(CompressLzma compress)
+    this(CompressLzma compress) @safe
     {
         format = compress.format;
         preset = compress.preset;
@@ -1747,7 +1750,7 @@ struct DecompressLzma
         deltaDist = compress.deltaDist;
     }
 
-    private void initStream(Stream stream)
+    private void initStream(Stream stream) @trusted
     {
         ulong memlim = memLimit;
         if (memLimit == size_t.max)
@@ -1777,19 +1780,19 @@ struct DecompressLzma
         enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
     {
         return lzmaCode(stream, lastChunk);
     }
 
-    Stream initialize()
+    Stream initialize() @safe
     {
         auto stream = new LzmaStream;
         initStream(stream);
         return stream;
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @safe
     {
         // Lzma supports reset out of the box by recalling initialization
         // function without calling lzma_end.
@@ -1797,18 +1800,18 @@ struct DecompressLzma
         initStream(stream);
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         lzma_end(&stream.strm);
     }
 }
 
-private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"lastChunk" lastChunk)
+private Flag!"streamEnded" lzmaCode(LzmaStream stream, Flag!"lastChunk" lastChunk) @safe
 {
     import std.conv : to;
 
     const action = lastChunk ? lzma_action.FINISH : lzma_action.RUN;
-    const res = lzma_code(&stream.strm, action);
+    const res = (() @trusted => lzma_code(&stream.strm, action))();
 
     enforce(
         res == lzma_ret.OK || res == lzma_ret.STREAM_END,
@@ -2085,13 +2088,13 @@ class ZstdStream : SquizStream
     private size_t totalIn;
     private size_t totalOut;
 
-    @property const(ubyte)[] input() const
+    @property const(ubyte)[] input() const @trusted
     {
         auto ptr = cast(const(ubyte)*) inBuf.src;
         return ptr[inBuf.pos .. inBuf.size];
     }
 
-    @property void input(const(ubyte)[] inp)
+    @property void input(const(ubyte)[] inp) @trusted
     {
         totalIn += inBuf.pos;
         inBuf.pos = 0;
@@ -2099,18 +2102,18 @@ class ZstdStream : SquizStream
         inBuf.size = inp.length;
     }
 
-    @property size_t totalInput() const
+    @property size_t totalInput() const @safe
     {
         return totalIn + inBuf.pos;
     }
 
-    @property inout(ubyte)[] output() inout
+    @property inout(ubyte)[] output() inout @trusted
     {
         auto ptr = cast(inout(ubyte)*) outBuf.dst;
         return ptr[outBuf.pos .. outBuf.size];
     }
 
-    @property void output(ubyte[] outp)
+    @property void output(ubyte[] outp) @trusted
     {
         totalOut += outBuf.pos;
         outBuf.pos = 0;
@@ -2118,12 +2121,12 @@ class ZstdStream : SquizStream
         outBuf.size = outp.length;
     }
 
-    @property size_t totalOutput() const
+    @property size_t totalOutput() const @safe
     {
         return totalOut + outBuf.pos;
     }
 
-    override string toString() const
+    override string toString() const @safe
     {
         import std.format : format;
 
@@ -2150,7 +2153,7 @@ private string zstdSetCParam(string name)
         "ZSTD_CCtx_setParameter(cctx, ZSTD_cParameter." ~ name ~ ", " ~ name ~ ");";
 }
 
-private void zstdError(size_t code, string desc)
+private void zstdError(size_t code, string desc) @trusted
 {
     import std.string : fromStringz;
 
@@ -2223,7 +2226,7 @@ struct CompressZstd
         private ZSTD_CStream* strm;
     }
 
-    private void setParams(Stream stream)
+    private void setParams(Stream stream) @trusted
     {
         auto cctx = cast(ZSTD_CCtx*) stream.strm;
 
@@ -2269,7 +2272,7 @@ struct CompressZstd
         mixin(zstdSetCParam("overlapLog"));
     }
 
-    Stream initialize()
+    Stream initialize() @trusted
     {
         auto stream = new Stream;
 
@@ -2280,18 +2283,18 @@ struct CompressZstd
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk)
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
     {
         auto cctx = cast(ZSTD_CCtx*) stream.strm;
         const directive = lastChunk ? ZSTD_EndDirective.end : ZSTD_EndDirective._continue;
 
-        const res = ZSTD_compressStream2(cctx, &stream.outBuf, &stream.inBuf, directive);
+        const res = (() @trusted => ZSTD_compressStream2(cctx, &stream.outBuf, &stream.inBuf, directive))();
 
         zstdError(res, "Could not compress data with Zstandard");
         return cast(Flag!"streamEnded")(lastChunk && res == 0);
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @trusted
     {
         auto cctx = cast(ZSTD_CCtx*) stream.strm;
         ZSTD_CCtx_reset(cctx, ZSTD_ResetDirective.session_only);
@@ -2305,7 +2308,7 @@ struct CompressZstd
         stream.totalOut = 0;
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         ZSTD_freeCStream(stream.strm);
     }
@@ -2322,7 +2325,7 @@ struct DecompressZstd
         private ZSTD_DStream* strm;
     }
 
-    private void setParams(Stream stream)
+    private void setParams(Stream stream) @trusted
     {
         auto dctx = cast(ZSTD_DCtx*) stream.strm;
 
@@ -2331,7 +2334,7 @@ struct DecompressZstd
                 ZSTD_dParameter.windowLogMax, windowLogMax);
     }
 
-    Stream initialize()
+    Stream initialize() @trusted
     {
         auto stream = new Stream;
 
@@ -2342,21 +2345,22 @@ struct DecompressZstd
         return stream;
     }
 
-    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk")
+    Flag!"streamEnded" process(Stream stream, Flag!"lastChunk") @safe
     {
-        const res = ZSTD_decompressStream(stream.strm, &stream.outBuf, &stream.inBuf);
+        const res = (() @trusted => ZSTD_decompressStream(stream.strm, &stream.outBuf, &stream
+                .inBuf))();
 
         zstdError(res, "Could not decompress data with Zstandard");
         return cast(Flag!"streamEnded")(res == 0);
     }
 
-    void reset(Stream stream)
+    void reset(Stream stream) @trusted
     {
         auto dctx = cast(ZSTD_DCtx*) stream.strm;
         ZSTD_DCtx_reset(dctx, ZSTD_ResetDirective.session_only);
     }
 
-    void end(Stream stream)
+    void end(Stream stream) @trusted
     {
         ZSTD_freeDStream(stream.strm);
     }
