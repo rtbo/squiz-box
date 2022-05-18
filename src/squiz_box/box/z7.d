@@ -15,6 +15,7 @@ import squiz_box.c.zlib;
 import squiz_box.priv;
 import squiz_box.squiz;
 
+import std.algorithm;
 import std.array;
 import std.conv;
 import std.datetime.systime;
@@ -81,7 +82,6 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
     private SignatureHeader signHeader;
     private Header header;
     private ulong startPos;
-    private ulong nextPos;
 
     private size_t fileInd;
     private size_t foldInd;
@@ -102,8 +102,6 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
 
     private void readHeaders()
     {
-        import std.algorithm : all;
-
         signHeader = parse!SignatureHeader(cursor);
         startPos = cursor.pos;
         cursor.ffw(signHeader.headerDbOffset);
@@ -146,8 +144,10 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
             header.mainStreams.codersInfo.folders.all!(f => !f.isComplex),
             "squiz-box does not support multiplexed streams"
         );
-
-        nextPos = startPos + header.mainStreams.packInfo.packPos;
+        enforce(
+            header.mainStreams.codersInfo.folders.length == header.mainStreams.packInfo.numPackStreams,
+            "mismatch between pack streams and folders"
+        );
     }
 
     private void prime()
@@ -155,32 +155,40 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
         const fileInfo = header.fileInfos[fileInd];
         Folder.SubStream ssInfo;
         ulong decoderPos;
-        size_t filI;
+        size_t fileI;
         size_t thisFoldI;
+        ulong foldPos = startPos + header.mainStreams.packInfo.packPos;
+        ulong foldSize;
 
-        outerLoop: foreach (foldI, ref Folder f; header.mainStreams.codersInfo.folders)
+        folderLoop: foreach (foldI, ref Folder f; header.mainStreams.codersInfo.folders)
         {
+            // TODO additional loop over folder streams (assuming one packed stream per folder ATM)
             decoderPos = 0;
+            foldSize = header.mainStreams.packInfo.packSizes[foldI];
+
             foreach (ref ss; f.subStreams)
             {
-                if (filI == fileInd)
+                if (fileI == fileInd)
                 {
                     thisFoldI = foldI;
                     ssInfo = ss;
-                    break outerLoop;
+                    break folderLoop;
                 }
                 else
                 {
-                    filI++;
+                    fileI++;
                     decoderPos += ss.size;
                 }
             }
+
+            foldPos += foldSize;
         }
         if (!decoder || thisFoldI != foldInd)
         {
+
             auto folder = header.mainStreams.codersInfo.folders[thisFoldI];
             foldInd = thisFoldI;
-            decoder = new EntryDecoder(cursor, folder);
+            decoder = new FolderDecoder(cursor, folder, foldPos, foldSize);
         }
 
         const path = fileInfo.name;
@@ -313,6 +321,85 @@ private bool attrIsDir(uint attributes) nothrow pure
 
         const dosAttrs = attributes & 0xffff;
         return !!(dosAttrs & FILE_ATTRIBUTE_DIRECTORY);
+    }
+}
+
+private class FolderDecoder
+{
+    Cursor cursor;
+    SquizAlgo algo;
+    SquizStream stream;
+    ulong packPos;
+    ulong packEnd;
+    ubyte[] inBuf;
+    ubyte[] outBuf;
+    ubyte[] availOut;
+
+    this(Cursor cursor, Folder folder, ulong packPos, ulong packSize)
+    {
+        this.cursor = cursor;
+        this.algo = folder.unpackAlgo();
+        this.stream = algo.initialize();
+        this.packPos = packPos;
+        this.packEnd = packPos + packSize;
+        this.inBuf = new ubyte[defaultChunkSize];
+        this.outBuf = new ubyte[defaultChunkSize];
+    }
+
+    ubyte[] decode(ubyte[] buf)
+    {
+        ubyte[] res;
+
+        while (res.length < buf.length)
+        {
+            // first take what is left in stream.output
+            if (availOut.length)
+            {
+                const len = min(availOut.length, buf.length - res.length);
+                buf[res.length .. res.length + len] = availOut[0 .. len];
+                res = buf[0 .. res.length + len];
+                availOut = availOut[len .. $];
+                continue;
+            }
+
+            // no decode output left, we have to decompress
+            // start by ensuring input data to the decoder
+            if (stream.input.length == 0 && packPos != packEnd)
+            {
+                const len = min(inBuf.length, packEnd-packPos);
+                stream.input = cursor.read(inBuf);
+                enforce(stream.input.length == len, "Unexpected end of input");
+                packPos += stream.input.length;
+            }
+
+            if (stream.output.length == 0)
+            {
+                stream.output = outBuf;
+                assert(availOut.length == 0);
+            }
+
+            auto startOut = stream.output;
+            const lastChunk = packEnd == packPos;
+            const ended = algo.process(stream, lastChunk);
+
+            availOut = startOut[0 .. startOut.length - stream.output.length];
+        }
+
+        return res;
+    }
+}
+
+private struct EntryDecoderRange
+{
+    EntryDecoder decoder;
+    ulong pos;
+    ulong end;
+
+    this(EntryDecoder decoder, ulong pos, ulong end)
+    {
+        this.decoder = decoder;
+        this.pos = pos;
+        this.end = end;
     }
 }
 
@@ -638,8 +725,6 @@ private struct PackInfo
 
     static PackInfo read(C)(C cursor)
     {
-        import std.algorithm : map;
-
         PackInfo res;
         res.packPos = readUint64(cursor);
         res.numPackStreams = readUint64(cursor);
@@ -879,8 +964,6 @@ private struct Folder
 
     @property size_t numCrcUndefined() const
     {
-        import std.algorithm : count;
-
         if (subStreams.length <= 1)
             return unpackCrc == 0 ? 1 : 0;
         return subStreams.count!(ss => ss.crc == 0);
@@ -1025,8 +1108,6 @@ private struct SubStreamsInfo
         }
         if (propId == PropId.crc)
         {
-            import std.algorithm : map, sum;
-
             writefln!"read CRC at %02x"(cursor.pos);
 
             const numDigest = folders.map!(f => f.numCrcUndefined()).sum();
@@ -1095,8 +1176,6 @@ private struct FileInfo
 
     static FileInfo[] read(C)(C cursor)
     {
-        import std.algorithm : count;
-
         const numFiles = cursor.readUint64();
         auto files = new FileInfo[numFiles];
         size_t numEmptyStreams;
@@ -1298,8 +1377,6 @@ private struct Header
             headerBuf ~= decompressed;
         }
 
-        import std.algorithm : min;
-
         size_t pos = 0;
         writefln!"        %(%02x  %)"(iota(0, 16));
         writeln();
@@ -1313,19 +1390,5 @@ private struct Header
         auto hc = new ArrayCursor(headerBuf, cursor.name);
         hc.enforceGetPropId(PropId.header, "Header decoded database");
         return readHeader(hc);
-    }
-}
-
-class EntryDecoder
-{
-    Cursor cursor;
-    SquizAlgo algo;
-    SquizStream stream;
-
-    this(Cursor cursor, Folder folder)
-    {
-        this.cursor = cursor;
-        algo = folder.unpackAlgo();
-        stream = algo.initialize();
     }
 }
