@@ -360,8 +360,13 @@ unittest
 @("Extract 7z")
 unittest
 {
-    import std.stdio : File;
+    import std.algorithm : each;
+    import std.stdio : File, writefln;
 
     const archive = testPath("data/archive.7z");
-    File(archive, "rb").read7zArchive();
+    File(archive, "rb")
+        .read7zArchive()
+        .each!((e) {
+            writefln!"% 50s % 10d bytes"(e.path, e.size);
+        });
 }

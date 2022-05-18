@@ -10,6 +10,7 @@
 /// I also took inspiration from a few algorithms in py7zr.
 module squiz_box.box.z7;
 
+import squiz_box.box;
 import squiz_box.c.zlib;
 import squiz_box.priv;
 import squiz_box.squiz;
@@ -78,18 +79,33 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
     // (both FileCursor and ArrayCursor are final)
     private C cursor;
     private SignatureHeader signHeader;
-    private Nullable!Header header;
+    private Header header;
+    private ulong startPos;
+    private ulong nextPos;
+
+    private size_t fileInd;
+    private size_t foldInd;
+    private size_t streamInd;
+    private EntryDecoder decoder;
+
+    private Z7ExtractEntry currentEntry;
 
     this(C cursor)
     {
         this.cursor = cursor;
 
         readHeaders();
+
+        if (fileInd < header.fileInfos.length)
+            prime();
     }
 
     private void readHeaders()
     {
+        import std.algorithm : all;
+
         signHeader = parse!SignatureHeader(cursor);
+        startPos = cursor.pos;
         cursor.ffw(signHeader.headerDbOffset);
 
         static if (is(C : ArrayCursor))
@@ -120,10 +136,187 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
             return;
 
         header = Header.read(dbCursor, cursor, 32);
+
+        static if (print7zDecode)
+        {
+            writeln("Read header ", header);
+        }
+
+        enforce(
+            header.mainStreams.codersInfo.folders.all!(f => !f.isComplex),
+            "squiz-box does not support multiplexed streams"
+        );
+
+        nextPos = startPos + header.mainStreams.packInfo.packPos;
+    }
+
+    private void prime()
+    {
+        const fileInfo = header.fileInfos[fileInd];
+        Folder.SubStream ssInfo;
+        ulong decoderPos;
+        size_t filI;
+        size_t thisFoldI;
+
+        outerLoop: foreach (foldI, ref Folder f; header.mainStreams.codersInfo.folders)
+        {
+            decoderPos = 0;
+            foreach (ref ss; f.subStreams)
+            {
+                if (filI == fileInd)
+                {
+                    thisFoldI = foldI;
+                    ssInfo = ss;
+                    break outerLoop;
+                }
+                else
+                {
+                    filI++;
+                    decoderPos += ss.size;
+                }
+            }
+        }
+        if (!decoder || thisFoldI != foldInd)
+        {
+            auto folder = header.mainStreams.codersInfo.folders[thisFoldI];
+            foldInd = thisFoldI;
+            decoder = new EntryDecoder(cursor, folder);
+        }
+
+        const path = fileInfo.name;
+        const size = ssInfo.size;
+        const mtime = fileInfo.mtime;
+        const attrs = fileInfo.attributes;
+
+        currentEntry = new Z7ExtractEntry(path, size, mtime, attrs, decoderPos, decoder);
+        fileInd++;
+    }
+
+    @property ArchiveExtractEntry front()
+    {
+        return currentEntry;
+    }
+
+    @property bool empty()
+    {
+        return currentEntry is null;
+    }
+
+    void popFront()
+    {
+        currentEntry = null;
+        if (fileInd < header.fileInfos.length)
+            prime();
     }
 }
 
-const(ubyte)[] readCursor(C)(C cursor, size_t len)
+final class Z7ExtractEntry : ArchiveExtractEntry
+{
+    string _path;
+    ulong _size;
+    long _mtime;
+    uint _attrs;
+    size_t _decoderPos;
+    EntryDecoder _decoder;
+
+    this(string path, ulong size, long mtime, uint attrs, size_t decoderPos, EntryDecoder decoder)
+    {
+        _path = path;
+        _size = size;
+        _mtime = mtime;
+        _attrs = attrs;
+        _decoderPos = decoderPos;
+        _decoder = decoder;
+    }
+
+    ByteRange byChunk(size_t chunkSize = defaultChunkSize)
+    {
+        return null;
+    }
+
+    @property size_t entrySize()
+    {
+        // not meaningful for 7z, several files encoded in the same compression pass
+        return 0;
+    }
+
+    @property EntryMode mode()
+    {
+        return EntryMode.extraction;
+    }
+
+    @property string path()
+    {
+        return _path;
+    }
+
+    @property EntryType type()
+    {
+        return attrIsDir(_attrs) ? EntryType.directory : EntryType.regular;
+    }
+
+    @property string linkname()
+    {
+        return null;
+    }
+
+    @property ulong size()
+    {
+        return _size;
+    }
+
+    @property SysTime timeLastModified()
+    {
+        return SysTime(_mtime);
+    }
+
+    @property uint attributes()
+    {
+        version (Posix)
+        {
+            if (_attrs & 0x8000)
+                return (_attrs & 0xffff0000) >> 16;
+            else
+                return octal!"100644";
+        }
+        else
+        {
+            return _attrs & 0xffff;
+        }
+    }
+
+    version (Posix)
+    {
+        @property int ownerId()
+        {
+            return int.max;
+        }
+
+        @property int groupId()
+        {
+            return int.max;
+        }
+    }
+
+}
+
+private bool attrIsDir(uint attributes) nothrow pure
+{
+    version (Posix)
+    {
+        const unixAttrs = attributes & 0x8000 ? ((attributes & 0xffff0000) >> 16) : octal!"100644";
+        return !!(unixAttrs & octal!"40_000");
+    }
+    else
+    {
+        import core.sys.windows.windows : FILE_ATTRIBUTE_DIRECTORY;
+
+        const dosAttrs = attributes & 0xffff;
+        return !!(dosAttrs & FILE_ATTRIBUTE_DIRECTORY);
+    }
+}
+
+private const(ubyte)[] readCursor(C)(C cursor, size_t len)
 {
     static if (is(C : ArrayCursor))
     {
@@ -135,22 +328,6 @@ const(ubyte)[] readCursor(C)(C cursor, size_t len)
         return cursor.read(buf);
     }
 }
-
-// void unpackStreamsInfo(C)(C cursor, StreamsInfo info)
-// {
-//     import std.array : join;
-
-//     auto packInfo = info.packInfo.get;
-//     cursor.seek(packInfo.packPos + 32);
-//     DecompressLzma algo;
-//     algo.format = LzmaFormat.rawLegacy;
-//     auto input = readCursor(cursor, packInfo.packSizes[0]);
-//     writefln("stream input [%(%02x, %)]", input);
-//     auto output = [input]
-//         .squiz(algo)
-//         .join();
-//     writefln("stream output [%(%02x, %)]", output);
-// }
 
 enum print7zDecode = true;
 
@@ -658,6 +835,11 @@ private struct Folder
         return null;
     }
 
+    @property bool isComplex() const
+    {
+        return numInStreams != 1 || numOutStreams != 1;
+    }
+
     size_t findInBindPair(size_t ind) const
     {
         foreach (i, bp; bindPairs)
@@ -768,8 +950,8 @@ private struct CodersInfo
 
 private struct StreamsInfo
 {
-    Nullable!PackInfo packInfo;
-    Nullable!CodersInfo codersInfo;
+    PackInfo packInfo;
+    CodersInfo codersInfo;
 
     static StreamsInfo read(C)(C cursor)
     {
@@ -787,7 +969,7 @@ private struct StreamsInfo
                 res.codersInfo = cursor.parse!CodersInfo();
                 break;
             case PropId.subStreamsInfo:
-                SubStreamsInfo.read(cursor, res.codersInfo.get.folders);
+                SubStreamsInfo.read(cursor, res.codersInfo.folders);
                 break;
             default:
                 unexpectedPropId(cursor.name, nextId, "StreamInfo");
@@ -878,52 +1060,45 @@ private struct SubStreamsInfo
 
 private enum long hnsecsFrom1601 = 504_911_232_000_000_000L;
 
-private struct FilesInfo
+private struct FileInfo
 {
-    static struct File
+    string name;
+
+    long ctime;
+    long atime;
+    long mtime;
+
+    uint attributes;
+
+    bool emptyStream;
+    bool emptyFile;
+    bool antiFile;
+
+    void setTime(PropId typ, long tim)
     {
-        bool emptyStream;
-        bool emptyFile;
-        bool antiFile;
-
-        long ctime;
-        long atime;
-        long mtime;
-
-        ulong attributes;
-
-        string name;
-
-        void setTime(PropId typ, long tim)
+        const stdTime = tim + hnsecsFrom1601;
+        switch (typ)
         {
-            const stdTime = tim + hnsecsFrom1601;
-            switch (typ)
-            {
-            case PropId.ctime:
-                ctime = stdTime;
-                break;
-            case PropId.atime:
-                atime = stdTime;
-                break;
-            case PropId.mtime:
-                mtime = stdTime;
-                break;
-            default:
-                assert(false);
-            }
+        case PropId.ctime:
+            ctime = stdTime;
+            break;
+        case PropId.atime:
+            atime = stdTime;
+            break;
+        case PropId.mtime:
+            mtime = stdTime;
+            break;
+        default:
+            assert(false);
         }
     }
 
-    File[] files;
-
-    static FilesInfo read(C)(C cursor)
+    static FileInfo[] read(C)(C cursor)
     {
         import std.algorithm : count;
 
-        auto res = FilesInfo.init;
-
         const numFiles = cursor.readUint64();
-        res.files = new File[numFiles];
+        auto files = new FileInfo[numFiles];
         size_t numEmptyStreams;
 
         while (true)
@@ -950,20 +1125,20 @@ private struct FilesInfo
             case PropId.emptyStream:
                 const emptyStreams = BooleanList.read(cursor, numFiles, No.checkAllDefined);
                 numEmptyStreams = emptyStreams.count!(e => e);
-                foreach (i, ref f; res.files)
+                foreach (i, ref f; files)
                     f.emptyStream = emptyStreams[i];
                 break;
             case PropId.emptyFile:
                 auto emptyFiles = BooleanList.read(cursor, numEmptyStreams, No.checkAllDefined);
                 size_t i;
-                foreach (ref f; res.files)
+                foreach (ref f; files)
                     if (f.emptyStream)
                         f.emptyFile = emptyFiles[i++];
                 break;
             case PropId.anti:
                 auto antiFiles = BooleanList.read(cursor, numEmptyStreams, No.checkAllDefined);
                 size_t i;
-                foreach (ref f; res.files)
+                foreach (ref f; files)
                     if (f.emptyStream)
                         f.antiFile = antiFiles[i++];
                 break;
@@ -991,7 +1166,7 @@ private struct FilesInfo
                         cursor.seek(gotoPos);
                     }
                 }
-                foreach (i, ref f; res.files)
+                foreach (i, ref f; files)
                 {
                     if (defined[i])
                     {
@@ -1028,17 +1203,17 @@ private struct FilesInfo
                         cursor.seek(gotoPos);
                     }
                 }
-                foreach (ref f; res.files)
+                foreach (ref f; files)
                 {
-                    wstring name;
+                    wstring wname;
                     while (true)
                     {
                         const c = cursor.getValue!wchar();
                         if (c == 0)
                             break;
-                        name ~= c;
+                        wname ~= c;
                     }
-                    transcode(name, f.name);
+                    transcode(wname, f.name);
                     writeln("  found name ", f.name);
                 }
                 break;
@@ -1046,14 +1221,14 @@ private struct FilesInfo
                 unexpectedPropId(cursor.name, propType, "FilesInfo");
             }
         }
-        return res;
+        return files;
     }
 }
 
 private struct Header
 {
     StreamsInfo mainStreams;
-    FilesInfo filesInfo;
+    FileInfo[] fileInfos;
 
     static Header read(DB, C)(DB dbCursor, C cursor, ulong packedStreamStart)
     {
@@ -1076,7 +1251,10 @@ private struct Header
             return res;
 
         enforceGetPropId(cursor, PropId.filesInfo, "Header");
-        res.filesInfo = cursor.parse!FilesInfo();
+        res.fileInfos = FileInfo.read(cursor);
+        writefln("read FileInfo %s", res.fileInfos);
+
+        enforceGetPropId(cursor, PropId.end, "Header");
 
         return res;
     }
@@ -1086,11 +1264,9 @@ private struct Header
         import std.array : join;
 
         auto info = StreamsInfo.read(dbCursor);
-        enforce(!info.packInfo.isNull, "Encoded header without PackInfo");
-        enforce(!info.codersInfo.isNull, "Encoded header without CodersInfo");
 
-        PackInfo packInfo = info.packInfo.get;
-        CodersInfo codersInfo = info.codersInfo.get;
+        PackInfo packInfo = info.packInfo;
+        CodersInfo codersInfo = info.codersInfo;
 
         ulong streamPos = packedStreamStart;
 
@@ -1137,5 +1313,19 @@ private struct Header
         auto hc = new ArrayCursor(headerBuf, cursor.name);
         hc.enforceGetPropId(PropId.header, "Header decoded database");
         return readHeader(hc);
+    }
+}
+
+class EntryDecoder
+{
+    Cursor cursor;
+    SquizAlgo algo;
+    SquizStream stream;
+
+    this(Cursor cursor, Folder folder)
+    {
+        this.cursor = cursor;
+        algo = folder.unpackAlgo();
+        stream = algo.initialize();
     }
 }
