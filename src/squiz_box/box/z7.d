@@ -16,6 +16,8 @@ import squiz_box.squiz;
 
 import std.array;
 import std.conv;
+import std.datetime.systime;
+import std.encoding;
 import std.exception;
 import std.format;
 import std.range;
@@ -51,6 +53,11 @@ class Corrupted7zArchiveException : Z7ArchiveException
         this.source = source;
         this.reason = reason;
     }
+}
+
+private noreturn bad7z(string source, string reason, string file = __FILE__, size_t line = __LINE__)
+{
+    throw new Corrupted7zArchiveException(source, reason, file, line);
 }
 
 auto read7zArchive(File file)
@@ -382,7 +389,7 @@ private enum PropId : ubyte
     archiveProps            = 0x02,
     additionalStreamsInfo   = 0x03,
     mainStreamsInfo         = 0x04,
-    fileInfo                = 0x05,
+    filesInfo               = 0x05,
     packInfo                = 0x06,
     unpackInfo              = 0x07,
     subStreamsInfo          = 0x08,
@@ -394,11 +401,11 @@ private enum PropId : ubyte
     emptyStream             = 0x0e,
     emptyFile               = 0x0f,
     anti                    = 0x10,
-    name                    = 0x11,
+    names                   = 0x11,
     ctime                   = 0x12,
     atime                   = 0x13,
     mtime                   = 0x14,
-    winAttributes           = 0x15,
+    attributes              = 0x15,
     comment                 = 0x16,
     encodeHeader            = 0x17,
     startPos                = 0x18,
@@ -812,7 +819,7 @@ private struct SubStreamsInfo
         else
         {
             foreach (ref f; folders)
-                f.subStreams = [ Folder.SubStream(f.unpackSize, f.unpackCrc) ];
+                f.subStreams = [Folder.SubStream(f.unpackSize, f.unpackCrc)];
         }
         if (propId == PropId.size)
         {
@@ -820,7 +827,7 @@ private struct SubStreamsInfo
             foreach (ref f; folders)
             {
                 ulong allButLast = 0;
-                foreach (ref s; f.subStreams[0 .. $-1])
+                foreach (ref s; f.subStreams[0 .. $ - 1])
                 {
                     const pos = cursor.pos;
                     const size = cursor.readUint64();
@@ -828,7 +835,7 @@ private struct SubStreamsInfo
                     s.size = size;
                     allButLast += size;
                 }
-                f.subStreams[$-1].size = f.unpackSize() - allButLast;
+                f.subStreams[$ - 1].size = f.unpackSize() - allButLast;
             }
             const pos = cursor.pos;
             propId = cursor.readPropId();
@@ -869,9 +876,184 @@ private struct SubStreamsInfo
     }
 }
 
+private enum long hnsecsFrom1601 = 504_911_232_000_000_000L;
+
+private struct FilesInfo
+{
+    static struct File
+    {
+        bool emptyStream;
+        bool emptyFile;
+        bool antiFile;
+
+        long ctime;
+        long atime;
+        long mtime;
+
+        ulong attributes;
+
+        string name;
+
+        void setTime(PropId typ, long tim)
+        {
+            const stdTime = tim + hnsecsFrom1601;
+            switch (typ)
+            {
+            case PropId.ctime:
+                ctime = stdTime;
+                break;
+            case PropId.atime:
+                atime = stdTime;
+                break;
+            case PropId.mtime:
+                mtime = stdTime;
+                break;
+            default:
+                assert(false);
+            }
+        }
+    }
+
+    File[] files;
+
+    static FilesInfo read(C)(C cursor)
+    {
+        import std.algorithm : count;
+
+        auto res = FilesInfo.init;
+
+        const numFiles = cursor.readUint64();
+        res.files = new File[numFiles];
+        size_t numEmptyStreams;
+
+        while (true)
+        {
+            const pos = cursor.pos;
+            const propType = cursor.readPropId();
+
+            if (propType == PropId.end)
+            {
+                writefln!"FilesInfo end at %04x"(pos);
+                break;
+            }
+
+            const size = cursor.readUint64();
+            writefln!"FilesInfo %s %s at %04x"(propType, size, pos);
+            // cursor.ffw(size);
+            // continue;
+
+            switch (propType)
+            {
+            case PropId.dummy:
+                cursor.ffw(size);
+                break;
+            case PropId.emptyStream:
+                const emptyStreams = BooleanList.read(cursor, numFiles, No.checkAllDefined);
+                numEmptyStreams = emptyStreams.count!(e => e);
+                foreach (i, ref f; res.files)
+                    f.emptyStream = emptyStreams[i];
+                break;
+            case PropId.emptyFile:
+                auto emptyFiles = BooleanList.read(cursor, numEmptyStreams, No.checkAllDefined);
+                size_t i;
+                foreach (ref f; res.files)
+                    if (f.emptyStream)
+                        f.emptyFile = emptyFiles[i++];
+                break;
+            case PropId.anti:
+                auto antiFiles = BooleanList.read(cursor, numEmptyStreams, No.checkAllDefined);
+                size_t i;
+                foreach (ref f; res.files)
+                    if (f.emptyStream)
+                        f.antiFile = antiFiles[i++];
+                break;
+            case PropId.ctime:
+            case PropId.atime:
+            case PropId.mtime:
+            case PropId.attributes:
+                const defined = BooleanList.read(cursor, numFiles, Yes.checkAllDefined);
+                const external = !!cursor.get;
+                writefln("  external %s", external);
+                writefln("  defined %s", defined);
+                ulong gotoPos = ulong.max;
+                if (external)
+                {
+                    const dataIndex = cursor.readUint64();
+                    gotoPos = cursor.pos;
+                    writefln("  external to %04x", dataIndex);
+                    cursor.seek(dataIndex);
+                }
+                scope (success)
+                {
+                    if (gotoPos != ulong.max)
+                    {
+                        writefln("  seeking back to %04x", gotoPos);
+                        cursor.seek(gotoPos);
+                    }
+                }
+                foreach (i, ref f; res.files)
+                {
+                    if (defined[i])
+                    {
+                        if (propType == PropId.attributes)
+                        {
+                            const data = cursor.getValue!uint();
+                            f.attributes = data;
+                        }
+                        else
+                        {
+                            const data = cursor.getValue!long();
+                            if (data >= long.max - hnsecsFrom1601)
+                                bad7z(cursor.name, "Inconsistent file timestamp");
+                            f.setTime(propType, data);
+                        }
+                    }
+                }
+                break;
+            case PropId.names:
+                const external = !!cursor.get;
+                ulong gotoPos = ulong.max;
+                if (external)
+                {
+                    const dataIndex = cursor.readUint64();
+                    gotoPos = cursor.pos;
+                    writefln("  external to %04x", dataIndex);
+                    cursor.seek(dataIndex);
+                }
+                scope (success)
+                {
+                    if (gotoPos != ulong.max)
+                    {
+                        writefln("  seeking back to %04x", gotoPos);
+                        cursor.seek(gotoPos);
+                    }
+                }
+                foreach (ref f; res.files)
+                {
+                    wstring name;
+                    while (true)
+                    {
+                        const c = cursor.getValue!wchar();
+                        if (c == 0)
+                            break;
+                        name ~= c;
+                    }
+                    transcode(name, f.name);
+                    writeln("  found name ", f.name);
+                }
+                break;
+            default:
+                unexpectedPropId(cursor.name, propType, "FilesInfo");
+            }
+        }
+        return res;
+    }
+}
+
 private struct Header
 {
     StreamsInfo mainStreams;
+    FilesInfo filesInfo;
 
     static Header read(DB, C)(DB dbCursor, C cursor, ulong packedStreamStart)
     {
@@ -889,6 +1071,13 @@ private struct Header
         Header res;
         enforceGetPropId(cursor, PropId.mainStreamsInfo, "Header database");
         res.mainStreams = cursor.parse!StreamsInfo();
+
+        if (cursor.eoi)
+            return res;
+
+        enforceGetPropId(cursor, PropId.filesInfo, "Header");
+        res.filesInfo = cursor.parse!FilesInfo();
+
         return res;
     }
 
