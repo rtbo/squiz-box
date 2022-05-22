@@ -83,10 +83,10 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
     private Header header;
     private ulong startPos;
 
-    private size_t fileInd;
+    private size_t nextFileInd;
     private size_t foldInd;
     private size_t streamInd;
-    private EntryDecoder decoder;
+    private FolderDecoder decoder;
 
     private Z7ExtractEntry currentEntry;
 
@@ -96,7 +96,7 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
 
         readHeaders();
 
-        if (fileInd < header.fileInfos.length)
+        if (nextFileInd < header.fileInfos.length)
             prime();
     }
 
@@ -152,23 +152,23 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
 
     private void prime()
     {
-        const fileInfo = header.fileInfos[fileInd];
+        const fileInfo = header.fileInfos[nextFileInd];
         Folder.SubStream ssInfo;
-        ulong decoderPos;
         size_t fileI;
         size_t thisFoldI;
-        ulong foldPos = startPos + header.mainStreams.packInfo.packPos;
-        ulong foldSize;
+        ulong streamPackPos = startPos + header.mainStreams.packInfo.packPos;
+        ulong foldPackSize;
+        ulong foldUnpackPos;
 
         folderLoop: foreach (foldI, ref Folder f; header.mainStreams.codersInfo.folders)
         {
             // TODO additional loop over folder streams (assuming one packed stream per folder ATM)
-            decoderPos = 0;
-            foldSize = header.mainStreams.packInfo.packSizes[foldI];
+            foldUnpackPos = 0;
+            foldPackSize = header.mainStreams.packInfo.packSizes[foldI];
 
             foreach (ref ss; f.subStreams)
             {
-                if (fileI == fileInd)
+                if (fileI == nextFileInd)
                 {
                     thisFoldI = foldI;
                     ssInfo = ss;
@@ -177,18 +177,17 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
                 else
                 {
                     fileI++;
-                    decoderPos += ss.size;
+                    foldUnpackPos += ss.size;
                 }
             }
 
-            foldPos += foldSize;
+            streamPackPos += foldPackSize;
         }
         if (!decoder || thisFoldI != foldInd)
         {
-
             auto folder = header.mainStreams.codersInfo.folders[thisFoldI];
             foldInd = thisFoldI;
-            decoder = new FolderDecoder(cursor, folder, foldPos, foldSize);
+            decoder = new FolderDecoder(cursor, folder, streamPackPos, foldPackSize);
         }
 
         const path = fileInfo.name;
@@ -196,8 +195,8 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
         const mtime = fileInfo.mtime;
         const attrs = fileInfo.attributes;
 
-        currentEntry = new Z7ExtractEntry(path, size, mtime, attrs, decoderPos, decoder);
-        fileInd++;
+        currentEntry = new Z7ExtractEntry(path, size, mtime, attrs, foldUnpackPos, decoder);
+        nextFileInd++;
     }
 
     @property ArchiveExtractEntry front()
@@ -213,7 +212,7 @@ private struct Z7ArchiveRead(C) if (is(C : SearchableCursor))
     void popFront()
     {
         currentEntry = null;
-        if (fileInd < header.fileInfos.length)
+        if (nextFileInd < header.fileInfos.length)
             prime();
     }
 }
@@ -224,22 +223,24 @@ final class Z7ExtractEntry : ArchiveExtractEntry
     ulong _size;
     long _mtime;
     uint _attrs;
-    size_t _decoderPos;
-    EntryDecoder _decoder;
+    size_t _unpackPos;
+    FolderDecoder _decoder;
 
-    this(string path, ulong size, long mtime, uint attrs, size_t decoderPos, EntryDecoder decoder)
+    this(string path, ulong size, long mtime, uint attrs, size_t unpackPos, FolderDecoder decoder)
     {
         _path = path;
         _size = size;
         _mtime = mtime;
         _attrs = attrs;
-        _decoderPos = decoderPos;
+        _unpackPos = unpackPos;
         _decoder = decoder;
     }
 
     ByteRange byChunk(size_t chunkSize = defaultChunkSize)
     {
-        return null;
+        return inputRangeObject!EntryDecoderRange(
+            EntryDecoderRange(_decoder, _unpackPos, _unpackPos + _size, chunkSize)
+        );
     }
 
     @property size_t entrySize()
@@ -326,16 +327,17 @@ private bool attrIsDir(uint attributes) nothrow pure
 
 private class FolderDecoder
 {
-    Cursor cursor;
+    SearchableCursor cursor;
     SquizAlgo algo;
     SquizStream stream;
     ulong packPos;
     ulong packEnd;
+    ulong unpackPos;
     ubyte[] inBuf;
     ubyte[] outBuf;
     ubyte[] availOut;
 
-    this(Cursor cursor, Folder folder, ulong packPos, ulong packSize)
+    this(SearchableCursor cursor, Folder folder, ulong packPos, ulong packSize)
     {
         this.cursor = cursor;
         this.algo = folder.unpackAlgo();
@@ -366,8 +368,9 @@ private class FolderDecoder
             // start by ensuring input data to the decoder
             if (stream.input.length == 0 && packPos != packEnd)
             {
-                const len = min(inBuf.length, packEnd-packPos);
-                stream.input = cursor.read(inBuf);
+                const len = min(inBuf.length, packEnd - packPos);
+                cursor.seek(packPos);
+                stream.input = cursor.read(inBuf[0 .. len]);
                 enforce(stream.input.length == len, "Unexpected end of input");
                 packPos += stream.input.length;
             }
@@ -379,11 +382,13 @@ private class FolderDecoder
             }
 
             auto startOut = stream.output;
-            const lastChunk = packEnd == packPos;
-            const ended = algo.process(stream, lastChunk);
+            const lastChunk = cast(Flag!"lastChunk")(packEnd == packPos);
+            algo.process(stream, lastChunk);
 
             availOut = startOut[0 .. startOut.length - stream.output.length];
         }
+
+        unpackPos += res.length;
 
         return res;
     }
@@ -391,15 +396,48 @@ private class FolderDecoder
 
 private struct EntryDecoderRange
 {
-    EntryDecoder decoder;
+    FolderDecoder decoder;
     ulong pos;
     ulong end;
+    ubyte[] buffer;
+    ubyte[] chunk;
 
-    this(EntryDecoder decoder, ulong pos, ulong end)
+    this(FolderDecoder decoder, ulong pos, ulong end, size_t chunkSize)
     {
         this.decoder = decoder;
         this.pos = pos;
         this.end = end;
+        buffer = new ubyte[chunkSize];
+
+        prime();
+    }
+
+    private void prime()
+    {
+        while (chunk.length < buffer.length && pos < end)
+        {
+            assert(pos == decoder.unpackPos, "Cursor has moved, entry no longer valid");
+            const len = min(buffer.length - chunk.length, end - pos);
+            auto res = decoder.decode(buffer[chunk.length .. chunk.length + len]);
+            chunk = buffer[0 .. chunk.length + res.length];
+            pos += res.length;
+        }
+    }
+
+    bool empty()
+    {
+        return chunk.length == 0;
+    }
+
+    const(ubyte)[] front()
+    {
+        return chunk;
+    }
+
+    void popFront()
+    {
+        chunk = null;
+        prime();
     }
 }
 

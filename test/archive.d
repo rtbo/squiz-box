@@ -361,12 +361,17 @@ unittest
 unittest
 {
     import std.algorithm : each;
-    import std.stdio : File, writefln;
+    import std.file : mkdir;
+    import std.stdio : File;
 
+    const dm = DeleteMe("extraction_site", null);
     const archive = testPath("data/archive.7z");
+
+    mkdir(dm.path);
+
     File(archive, "rb")
         .read7zArchive()
-        .each!((e) {
-            writefln!"% 50s % 10d bytes"(e.path, e.size);
-        });
+        .each!(e => e.extractTo(dm.path));
+
+    testExtractedFiles(dm, Yes.mode666);
 }
