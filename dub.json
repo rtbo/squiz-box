@@ -1,7 +1,7 @@
 {
     "name": "squiz-box",
     "authors": ["Rémi Thebault (rtbo) <remi.thebault@gmail.com>"],
-    "description": "Range based compression and archiving library",
+    "description": "Range based compression and archiving library. Support for Zip, Tar (with .gz, .bz2, .xz), Zstandard, LZMA...",
     "copyright": "Copyright (C) 2022, Rémi Thebault",
     "license": "MIT",
     "targetType": "library",
