@@ -702,7 +702,7 @@ struct GzHeader
 }
 
 /// Type of delegate to use as callback for Inflate.gzHeaderDg
-alias GzHeaderDg = void delegate(GzHeader header);
+alias GzHeaderDg = void delegate(GzHeader header) @safe;
 
 /// Helper to set GzHeader.text
 /// Will check if the data are all ascii characters
@@ -980,7 +980,7 @@ struct Inflate
         return stream;
     }
 
-    package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ )
+    package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ ) @safe
     {
         const res = (() @trusted => squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH))();
         //
