@@ -1,0 +1,20 @@
+option('enable_bzip2',
+    type: 'boolean',
+    value: true,
+    description: 'Whether to enable Bzip2 support',
+)
+option('enable_lzma',
+    type: 'boolean',
+    value: true,
+    description: 'Whether to enable LZMA (and XZ) support',
+)
+option('enable_zstd',
+    type: 'boolean',
+    value: true,
+    description: 'Whether to enable Zstandard support',
+)
+option('minimal',
+    type: 'boolean',
+    value: false,
+    description: 'Disable features requiring external libraries',
+)

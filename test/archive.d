@@ -239,42 +239,48 @@ unittest
     testExtractedFiles(dm, Yes.mode666);
 }
 
-@("Decompress and extract tar.bz2")
-unittest
+version (HaveSquizBzip2)
 {
-    import std.algorithm : each;
-    import std.file : mkdir;
+    @("Decompress and extract tar.bz2")
+    unittest
+    {
+        import std.algorithm : each;
+        import std.file : mkdir;
 
-    const archive = testPath("data/archive.tar.bz2");
-    const dm = DeleteMe("extraction_site", null);
+        const archive = testPath("data/archive.tar.bz2");
+        const dm = DeleteMe("extraction_site", null);
 
-    mkdir(dm.path);
+        mkdir(dm.path);
 
-    readBinaryFile(archive)
-        .decompressBzip2()
-        .readTarArchive()
-        .each!(e => e.extractTo(dm.path));
+        readBinaryFile(archive)
+            .decompressBzip2()
+            .readTarArchive()
+            .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm, Yes.mode666);
+        testExtractedFiles(dm, Yes.mode666);
+    }
 }
 
-@("Decompress and extract tar.xz")
-unittest
+version (HaveSquizLzma)
 {
-    import std.algorithm : each;
-    import std.file : mkdir;
+    @("Decompress and extract tar.xz")
+    unittest
+    {
+        import std.algorithm : each;
+        import std.file : mkdir;
 
-    const archive = testPath("data/archive.tar.xz");
-    const dm = DeleteMe("extraction_site", null);
+        const archive = testPath("data/archive.tar.xz");
+        const dm = DeleteMe("extraction_site", null);
 
-    mkdir(dm.path);
+        mkdir(dm.path);
 
-    readBinaryFile(archive)
-        .decompressXz()
-        .readTarArchive()
-        .each!(e => e.extractTo(dm.path));
+        readBinaryFile(archive)
+            .decompressXz()
+            .readTarArchive()
+            .each!(e => e.extractTo(dm.path));
 
-    testExtractedFiles(dm, Yes.mode666);
+        testExtractedFiles(dm, Yes.mode666);
+    }
 }
 
 @("Create Zip")

@@ -3,16 +3,12 @@ project('squiz-box', ['c', 'd'],
     default_options: ['default_library=static'],
 )
 
-
 thread_dep = dependency('threads')
 
 subdir('3rdparty')
 
 squiz_src = files([
-    'src/squiz_box/c/bzip2.d',
-    'src/squiz_box/c/lzma.d',
     'src/squiz_box/c/zlib.d',
-    'src/squiz_box/c/zstd.d',
 
     'src/squiz_box/box/package.d',
     'src/squiz_box/box/tar.d',
@@ -26,11 +22,27 @@ squiz_src = files([
 squiz_inc = include_directories('src')
 
 squiz_ver = []
-if host_machine.system() == 'windows'
-    squiz_ver = ['Windows10']
+squiz_deps = []
+
+if get_option('enable_bzip2') and not get_option('minimal')
+    squiz_src += files('src/squiz_box/c/bzip2.d')
+    squiz_ver += 'HaveSquizBzip2'
+    squiz_deps += bz2_dep
+endif
+if get_option('enable_lzma') and not get_option('minimal')
+    squiz_src += files('src/squiz_box/c/lzma.d')
+    squiz_ver += 'HaveSquizLzma'
+    squiz_deps += xz_dep
+endif
+if get_option('enable_zstd') and not get_option('minimal')
+    squiz_src += files('src/squiz_box/c/zstd.d')
+    squiz_ver += 'HaveSquizZstandard'
+    squiz_deps += zstd_dep
 endif
 
-squiz_deps = [bz2_dep, xz_dep, zstd_dep]
+if host_machine.system() == 'windows'
+    squiz_ver += ['Windows10']
+endif
 
 squiz_lib = library('squiz-box', squiz_src,
     install: true,

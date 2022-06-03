@@ -1,5 +1,13 @@
 module squiz_box.c.bzip2;
 
+version (HaveSquizBzip2)
+{
+}
+else
+{
+    static assert(false, "Bzip2 support is disabled");
+}
+
 import core.stdc.stdio : FILE;
 
 enum BZ_RUN = 0;
