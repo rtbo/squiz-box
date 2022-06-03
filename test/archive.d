@@ -29,8 +29,8 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
         const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
         const line2 = `^-rw-r--r-- .+ 3521 .+ file 2.txt$`;
         const line3 = mode666 ?
-            `^-rw-rw-rw- .+ 26 .+ folder.+chmod 666.txt$` :
-            `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
+            `^-rw-rw-rw- .+ 26 .+ folder.+chmod 666.txt$`
+            : `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
 
         auto res = execute(["tar", "-tvf", archivePath]);
         assert(res.status == 0);
@@ -52,10 +52,11 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
     sha1 = sha1sumFile("file 2.txt");
     assert(sha1 == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
 
-    try {
+    try
+    {
         sha1 = sha1sumFile("folder/chmod 666.txt");
     }
-    catch(Exception)
+    catch (Exception)
     {
         sha1 = sha1sumFile("folder\\\\chmod 666.txt"); // windows tar is a weirdo
     }
@@ -136,7 +137,7 @@ unittest
         .createTarArchive()
         .writeBinaryFile(archive.path);
 
-    version(Windows)
+    version (Windows)
         enum m666 = No.mode666;
     else
         enum m666 = Yes.mode666;
@@ -290,7 +291,7 @@ unittest
         .createZipArchive()
         .writeBinaryFile(archive.path);
 
-    version(Windows)
+    version (Windows)
         testTarArchiveContent(archive.path, No.testModes, No.mode666);
     else
         testZipArchiveContent(archive.path);
