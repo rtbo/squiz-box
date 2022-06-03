@@ -8,13 +8,25 @@
 
     "sourcePaths": ["src"],
 
-    "sourceFiles-windows-x86_64": [
-        "$PACKAGE_DIR/windows-x64/bz2.lib",
-        "$PACKAGE_DIR/windows-x64/lzma.lib",
-        "$PACKAGE_DIR/windows-x64/zstd.lib"
-    ],
-
-    "versions-windows": [ "Windows10" ],
-
-    "libs-linux": ["bz2", "lzma", "zstd"]
+    "configurations": [
+        {
+            "name": "library",
+            "sourceFiles-windows-x86_64": [
+                "$PACKAGE_DIR/windows-x64/bz2.lib",
+                "$PACKAGE_DIR/windows-x64/lzma.lib",
+                "$PACKAGE_DIR/windows-x64/zstd.lib"
+            ],
+            "versions": [
+                "HaveSquizBzip2",
+                "HaveSquizLzma",
+                "HaveSquizZstandard",
+                "Windows10"
+            ],
+            "libs-posix": ["bz2", "lzma", "zstd"]
+        },
+        {
+            "name": "minimal",
+            "versions-windows": ["Windows10"]
+        }
+    ]
 }
