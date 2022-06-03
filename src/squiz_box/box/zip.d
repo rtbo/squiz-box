@@ -381,7 +381,7 @@ private class Deflater
 
             stream.output = deflateBuffer[deflated.length .. $];
 
-            const ended = algo.process(stream, cast(Flag!"lastChunk")input.empty);
+            const ended = algo.process(stream, cast(Flag!"lastChunk") input.empty);
 
             deflated = deflateBuffer[0 .. $ - stream.output.length];
 
@@ -1004,9 +1004,11 @@ private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor)
             );
 
         if (info.deflated)
-            return new InflateByChunk!C(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new InflateByChunk!C(input, startPos, info.compressedSize, chunkSize, info
+                    .expectedCrc32);
         else
-            return new StoredByChunk!C(input, startPos, info.compressedSize, chunkSize, info.expectedCrc32);
+            return new StoredByChunk!C(input, startPos, info.compressedSize, chunkSize, info
+                    .expectedCrc32);
     }
 }
 
@@ -1210,7 +1212,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 
             stream.output = chunkBuffer[chunk.length .. $];
 
-            ended = algo.process(stream, cast(Flag!"lastChunk")input.eoi);
+            ended = algo.process(stream, cast(Flag!"lastChunk") input.eoi);
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
 

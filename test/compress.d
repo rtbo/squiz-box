@@ -116,165 +116,171 @@ unittest
     })(len, dataGz.path, "compressGz", "repetitive", "gzip");
 }
 
-@("Compress Bz2 tar")
-unittest
+version (HaveSquizBzip2)
 {
-    import std.algorithm : copy;
-    import std.stdio : File;
+    @("Compress Bz2 tar")
+    unittest
+    {
+        import std.algorithm : copy;
+        import std.stdio : File;
 
-    auto archive = DeleteMe("archive", ".tar.bz2");
+        auto archive = DeleteMe("archive", ".tar.bz2");
 
-    auto tarF = File(testPath("data/archive.tar"), "rb");
+        auto tarF = File(testPath("data/archive.tar"), "rb");
 
-    enum bufSize = 8192;
+        enum bufSize = 8192;
 
-    tarF.byChunk(bufSize)
-        .compressBzip2(bufSize)
-        .writeBinaryFile(archive.path);
+        tarF.byChunk(bufSize)
+            .compressBzip2(bufSize)
+            .writeBinaryFile(archive.path);
 
-    tarF.close();
+        tarF.close();
 
-    // windows do not have bzip2
-    // deactivating for now
-    version (Posix)
-        testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
+        // windows do not have bzip2
+        // deactivating for now
+        version (Posix)
+            testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
+    }
+
+    @("Compress Bz2 sequential")
+    unittest
+    {
+        import std.algorithm : filter;
+        import std.digest.sha : SHA1;
+
+        auto dm = DeleteMe("data", ".bz2");
+
+        const len = 10_000;
+
+        testCompressData!({
+            SHA1 sha;
+            bool sha1(ByteChunk bytes)
+            {
+                sha.put(bytes);
+                return true;
+            }
+
+            generateSequentialData(len, 1239, 13, 8192)
+                .filter!sha1
+                .compressBzip2(8192)
+                .writeBinaryFile(dm.path);
+
+            return sha.finish();
+        })(len, dm.path, "compressBz2", "sequential", "bzip2");
+    }
+
+    @("Compress Bzip2 repetitive")
+    unittest
+    {
+        // Bzip2 is really inefficient with repetitive data, so I lower the volume for this one
+        import std.algorithm : filter;
+        import std.digest.sha : SHA1;
+
+        auto dm = DeleteMe("data", ".bz2");
+
+        const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
+        const len = 1000 * 1000;
+
+        testCompressData!({
+            SHA1 sha;
+            bool sha1(ByteChunk bytes)
+            {
+                sha.put(bytes);
+                return true;
+            }
+
+            generateRepetitiveData(len, phrase, 8192)
+                .filter!sha1
+                .compressBzip2(8192)
+                .writeBinaryFile(dm.path);
+
+            return sha.finish();
+        })(len, dm.path, "compressBz2", "repetitive", "bzip2");
+    }
 }
 
-@("Compress Bz2 sequential")
-unittest
+version (HaveSquizLzma)
 {
-    import std.algorithm : filter;
-    import std.digest.sha : SHA1;
+    @("Compress XZ tar")
+    unittest
+    {
+        import std.algorithm : copy;
+        import std.stdio : File;
 
-    auto dm = DeleteMe("data", ".bz2");
+        auto archive = DeleteMe("archive", ".tar.xz");
 
-    const len = 10_000;
+        auto tarF = File(testPath("data/archive.tar"), "rb");
+        auto tarXzF = File(archive.path, "wb");
 
-    testCompressData!({
-        SHA1 sha;
-        bool sha1(ByteChunk bytes)
-        {
-            sha.put(bytes);
-            return true;
-        }
+        enum bufSize = 8192;
 
-        generateSequentialData(len, 1239, 13, 8192)
-            .filter!sha1
-            .compressBzip2(8192)
-            .writeBinaryFile(dm.path);
+        tarF.byChunk(bufSize)
+            .compressXz(bufSize)
+            .copy(tarXzF.lockingBinaryWriter);
 
-        return sha.finish();
-    })(len, dm.path, "compressBz2", "sequential", "bzip2");
-}
+        tarF.close();
+        tarXzF.close();
 
-@("Compress Bzip2 repetitive")
-unittest
-{
-    // Bzip2 is really inefficient with repetitive data, so I lower the volume for this one
-    import std.algorithm : filter;
-    import std.digest.sha : SHA1;
+        // windows do not have xz
+        // deactivating for now
+        version (Posix)
+            testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
+    }
 
-    auto dm = DeleteMe("data", ".bz2");
+    @("Compress XZ sequential")
+    unittest
+    {
+        import std.algorithm : filter;
+        import std.digest.sha : SHA1;
 
-    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
-    const len = 1000 * 1000;
+        auto dataXz = DeleteMe("data", ".xz");
 
-    testCompressData!({
-        SHA1 sha;
-        bool sha1(ByteChunk bytes)
-        {
-            sha.put(bytes);
-            return true;
-        }
+        const len = 10_000;
 
-        generateRepetitiveData(len, phrase, 8192)
-            .filter!sha1
-            .compressBzip2(8192)
-            .writeBinaryFile(dm.path);
+        testCompressData!({
+            SHA1 sha;
+            bool sha1(ByteChunk bytes)
+            {
+                sha.put(bytes);
+                return true;
+            }
 
-        return sha.finish();
-    })(len, dm.path, "compressBz2", "repetitive", "bzip2");
-}
+            generateSequentialData(len, 1239, 13, 8192)
+                .filter!sha1
+                .compressXz(8192)
+                .writeBinaryFile(dataXz.path);
 
-@("Compress XZ tar")
-unittest
-{
-    import std.algorithm : copy;
-    import std.stdio : File;
+            return sha.finish();
+        })(len, dataXz.path, "compressXz", "sequential", "xz");
+    }
 
-    auto archive = DeleteMe("archive", ".tar.xz");
+    @("Compress XZ repetitive")
+    unittest
+    {
+        import std.algorithm : filter;
+        import std.digest.sha : SHA1;
 
-    auto tarF = File(testPath("data/archive.tar"), "rb");
-    auto tarXzF = File(archive.path, "wb");
+        auto dataXz = DeleteMe("data", ".xz");
 
-    enum bufSize = 8192;
+        const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
+        const len = 1000 * 1000;
 
-    tarF.byChunk(bufSize)
-        .compressXz(bufSize)
-        .copy(tarXzF.lockingBinaryWriter);
+        testCompressData!({
+            SHA1 sha;
+            bool sha1(ByteChunk bytes)
+            {
+                sha.put(bytes);
+                return true;
+            }
 
-    tarF.close();
-    tarXzF.close();
+            generateRepetitiveData(len, phrase, 8192)
+                .filter!sha1
+                .compressXz(8192)
+                .writeBinaryFile(dataXz.path);
 
-    // windows do not have xz
-    // deactivating for now
-    version (Posix)
-        testTarArchiveContent(archive.path, Yes.testModes, Yes.mode666);
-}
-
-@("Compress XZ sequential")
-unittest
-{
-    import std.algorithm : filter;
-    import std.digest.sha : SHA1;
-
-    auto dataXz = DeleteMe("data", ".xz");
-
-    const len = 10_000;
-
-    testCompressData!({
-        SHA1 sha;
-        bool sha1(ByteChunk bytes)
-        {
-            sha.put(bytes);
-            return true;
-        }
-
-        generateSequentialData(len, 1239, 13, 8192)
-            .filter!sha1
-            .compressXz(8192)
-            .writeBinaryFile(dataXz.path);
-
-        return sha.finish();
-    })(len, dataXz.path, "compressXz", "sequential", "xz");
-}
-
-@("Compress XZ repetitive")
-unittest
-{
-    import std.algorithm : filter;
-    import std.digest.sha : SHA1;
-
-    auto dataXz = DeleteMe("data", ".xz");
-
-    const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.";
-    const len = 1000 * 1000;
-
-    testCompressData!({
-        SHA1 sha;
-        bool sha1(ByteChunk bytes)
-        {
-            sha.put(bytes);
-            return true;
-        }
-
-        generateRepetitiveData(len, phrase, 8192)
-            .filter!sha1
-            .compressXz(8192)
-            .writeBinaryFile(dataXz.path);
-
-        return sha.finish();
-    })(len, dataXz.path, "compressXz", "repetitive", "xz");
+            return sha.finish();
+        })(len, dataXz.path, "compressXz", "repetitive", "xz");
+    }
 }
 
 private void testCompressData(alias fun)(size_t len, string filename, string algo, string datatype, string utility)

@@ -1,6 +1,14 @@
 /// Zstandard bindings module
 module squiz_box.c.zstd;
 
+version (HaveSquizZstandard)
+{
+}
+else
+{
+    static assert(false, "Zstandard support is disabled");
+}
+
 import core.stdc.config;
 import std.algorithm : min;
 import std.format;

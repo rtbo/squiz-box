@@ -1,5 +1,13 @@
 module squiz_box.c.lzma;
 
+version (HaveSquizLzma)
+{
+}
+else
+{
+    static assert(false, "LZMA and XZ support is disabled");
+}
+
 import std.traits : isIntegral;
 
 private alias uint8_t = ubyte;
