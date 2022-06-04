@@ -363,3 +363,22 @@ unittest
 
     testExtractedFiles(dm, Yes.mode666);
 }
+
+@("Extract 7z")
+unittest
+{
+    import std.algorithm : each;
+    import std.file : mkdir;
+    import std.stdio : File;
+
+    const dm = DeleteMe("extraction_site", null);
+    const archive = testPath("data/archive.7z");
+
+    mkdir(dm.path);
+
+    File(archive, "rb")
+        .read7zArchive()
+        .each!(e => e.extractTo(dm.path));
+
+    testExtractedFiles(dm, Yes.mode666);
+}
