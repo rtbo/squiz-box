@@ -11,6 +11,24 @@ import std.range;
 public import squiz_box.box.tar;
 public import squiz_box.box.zip;
 
+/// A dynamic range of ArchiveCreateEntry
+alias CreateEntryRange = InputRange!ArchiveCreateEntry;
+
+/// A dynamic range of ArchiveExtractEntry
+alias ExtractEntryRange = InputRange!ArchiveExtractEntry;
+
+/// A dynamic boxing algorithm
+interface BoxAlgo
+{
+    ByteRange box(CreateEntryRange entries);
+}
+
+/// A dynamic unboxing algorithm
+interface UnboxAlgo
+{
+    ExtractEntryRange unbox(ByteRange bytes);
+}
+
 /// Static check that a type is an InputRange of ArchiveCreateEntry
 template isCreateEntryRange(I)
 {
