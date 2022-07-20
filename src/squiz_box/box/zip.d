@@ -10,6 +10,21 @@ import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
 
+class ZipAlgo : BoxAlgo, UnboxAlgo
+{
+    ByteRange box (CreateEntryRange entries)
+    {
+        auto bytes = createZipArchive(entries);
+        return inputRangeObject(bytes);
+    }
+
+    ExtractEntryRange unbox (ByteRange bytes)
+    {
+        auto entries = readZipArchive(bytes);
+        return inputRangeObject(entries);
+    }
+}
+
 auto createZipArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isCreateEntryRange!I)
 {
