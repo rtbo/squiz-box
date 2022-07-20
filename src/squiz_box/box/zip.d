@@ -12,26 +12,26 @@ import std.stdio : File;
 
 class ZipAlgo : BoxAlgo, UnboxAlgo
 {
-    ByteRange box (CreateEntryRange entries)
+    ByteRange box(CreateEntryRange entries)
     {
-        auto bytes = createZipArchive(entries);
+        auto bytes = boxZip(entries);
         return inputRangeObject(bytes);
     }
 
-    ExtractEntryRange unbox (ByteRange bytes)
+    ExtractEntryRange unbox(ByteRange bytes)
     {
-        auto entries = readZipArchive(bytes);
+        auto entries = unboxZip(bytes);
         return inputRangeObject(entries);
     }
 }
 
-auto createZipArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
+auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isCreateEntryRange!I)
 {
-    return ZipArchiveCreate!I(entries, chunkSize);
+    return ZipBox!I(entries, chunkSize);
 }
 
-private struct ZipArchiveCreate(I)
+private struct ZipBox(I)
 {
     private I entries;
 
@@ -409,25 +409,25 @@ private class Deflater
     }
 }
 
-auto readZipArchive(I)(I input) if (isByteRange!I)
+auto unboxZip(I)(I input) if (isByteRange!I)
 {
     auto stream = new ByteRangeCursor!I(input);
-    return ZipArchiveRead!Cursor(stream);
+    return ZipUnbox!Cursor(stream);
 }
 
-auto readZipArchive(File input)
+auto unboxZip(File input)
 {
     auto stream = new FileCursor(input);
-    return ZipArchiveRead!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream);
 }
 
-auto readZipArchive(ubyte[] zipData)
+auto unboxZip(ubyte[] zipData)
 {
     auto stream = new ArrayCursor(zipData);
-    return ZipArchiveRead!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream);
 }
 
-private struct ZipArchiveRead(C) if (is(C : Cursor))
+private struct ZipUnbox(C) if (is(C : Cursor))
 {
     enum isSearchable = is(C : SearchableCursor);
 

@@ -294,7 +294,7 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createZipArchive()
+        .boxZip()
         .writeBinaryFile(archive.path);
 
     version (Windows)
@@ -315,7 +315,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .readZipArchive()
+        .unboxZip()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, No.mode666);
@@ -334,7 +334,7 @@ unittest
     mkdir(dm.path);
 
     auto entries = File(archive, "rb")
-        .readZipArchive()
+        .unboxZip()
         .array;
 
     entries[2].extractTo(dm.path);
@@ -357,8 +357,8 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createZipArchive()
-        .readZipArchive()
+        .boxZip()
+        .unboxZip()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
