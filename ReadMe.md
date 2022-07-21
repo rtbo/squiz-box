@@ -3,13 +3,13 @@
 A D library that handles compression / decompression and archiving.
 
 In the Squiz-Box terminology, `squiz` refers to compression/decompression, while `box` refers to
-archiving. Squiz-Box API consists almost exclusively on range algorithms.
+archiving. Squiz-Box API consists almost exclusively of range algorithms.
 `squiz` related algorithms map a range of bytes to another range of bytes where one is the compressed stream of the other. `box` and `unbox` related algorithms map a range of file entries to/from a range of bytes.
 
 Squiz-Box provides both compile time known structures and dynamic types over all algorithms.
 ## Compression / decompression
 
-The range based design makes _squizing_ suiatble for streaming and for
+The range based design makes _squizing_ suitable for streaming and for
 transforming data from any kind of source to any kind of destination.
 
 ### Algorithms and formats
@@ -50,7 +50,7 @@ The `squiz` function works for both compression and decompression and there are 
 helpers built upon it (`deflate`, `inflate`, `compressXz`, ...).
 See code examples below for usage.
 
-## Archiving (Boxing)
+## Archiving
 
 Whenever possible, archving and de-archiving are implemented as the
 transformation of a range of file entries to a range of bytes.
