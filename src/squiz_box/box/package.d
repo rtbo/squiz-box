@@ -26,6 +26,44 @@ interface BoxAlgo
     /// Unbox the given byte range to a range of entries
     UnboxEntryRange unbox(ByteRange bytes);
 
+    static BoxAlgo forFilename(string filename)
+    {
+        import std.string : endsWith, toLower;
+        import std.path : baseName;
+
+        const fn = baseName(filename).toLower();
+
+        if (fn.endsWith(".tar.xz"))
+        {
+            version (HaveSquizLzma)
+            {
+                return new TarXzAlgo();
+            }
+            else {
+                assert(false, "Squiz-Box built without LZMA support");
+            }
+        }
+        else if (fn.endsWith(".tar.gz"))
+        {
+            return new TarGzAlgo();
+        }
+        else if (fn.endsWith(".zip"))
+        {
+            return new ZipAlgo();
+        }
+        else if (fn.endsWith(".tar.bz2"))
+        {
+            version (HaveSquizBzip2)
+            {
+                return new TarBzip2Algo();
+            }
+            else {
+                assert(false, "Squiz-Box built without Bzip2 support");
+            }
+        }
+
+        throw new Exception(fn ~ " has unsupported archive extension");
+    }
 }
 
 /// Static check that a type is an InputRange of BoxEntry
