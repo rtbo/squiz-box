@@ -257,7 +257,7 @@ If you want to use squiz-box in a Meson project, you should use it as a subproje
 
 To build, test on Linux:
 ```sh
-meson builddir -Ddefault_library=static
+meson builddir
 cd builddir
 ninja && ./squiz-test
 ```
@@ -267,7 +267,7 @@ To build test on Windows:
 rem Visual Studio prompt is required
 rem A script is provided to help this (needs vswhere)
 win_env_vs.bat
-meson builddir -Ddefault_library=static
+meson builddir
 cd builddir
 ninja && squiz-test.exe
 ```
