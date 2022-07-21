@@ -159,7 +159,7 @@ dirEntries(root, SpanMode.breadth, false)
     .filter!(e => !e.isDir)
     .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
     .map!(e => fileEntry(e.name, root, prefix))
-    .createTarArchive()
+    .boxTar()
     .compressXz()
     .writeBinaryFile("squiz-box-12.5.tar.xz");
 ```
@@ -176,7 +176,7 @@ mkdir(extractionSite);
 
 readBinaryFile(archive)
     .inflateGz()
-    .readTarArchive()
+    .unboxTar()
     .each!(e => e.extractTo(extractionSite));
 ```
 

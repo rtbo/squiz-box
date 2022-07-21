@@ -134,7 +134,7 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createTarArchive()
+        .boxTar()
         .writeBinaryFile(archive.path);
 
     version (Windows)
@@ -187,7 +187,7 @@ unittest
 
     const readEntries = File(path, "rb")
         .byChunk(defaultChunkSize)
-        .readTarArchive()
+        .unboxTar()
         .map!((entry) {
             const content = entry.readContent();
             return Entry(
@@ -214,7 +214,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .readTarArchive()
+        .unboxTar()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
@@ -233,7 +233,7 @@ unittest
 
     readBinaryFile(archive)
         .inflateGz()
-        .readTarArchive()
+        .unboxTar()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
@@ -254,7 +254,7 @@ version (HaveSquizBzip2)
 
         readBinaryFile(archive)
             .decompressBzip2()
-            .readTarArchive()
+            .unboxTar()
             .each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);
@@ -276,7 +276,7 @@ version (HaveSquizLzma)
 
         readBinaryFile(archive)
             .decompressXz()
-            .readTarArchive()
+            .unboxTar()
             .each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);

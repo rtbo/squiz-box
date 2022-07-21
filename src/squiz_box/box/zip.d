@@ -12,13 +12,13 @@ import std.stdio : File;
 
 class ZipAlgo : BoxAlgo, UnboxAlgo
 {
-    ByteRange box(CreateEntryRange entries)
+    ByteRange box(BoxEntryRange entries)
     {
         auto bytes = boxZip(entries);
         return inputRangeObject(bytes);
     }
 
-    ExtractEntryRange unbox(ByteRange bytes)
+    UnboxEntryRange unbox(ByteRange bytes)
     {
         auto entries = unboxZip(bytes);
         return inputRangeObject(entries);
@@ -26,7 +26,7 @@ class ZipAlgo : BoxAlgo, UnboxAlgo
 }
 
 auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
-        if (isCreateEntryRange!I)
+        if (isBoxEntryRange!I)
 {
     return ZipBox!I(entries, chunkSize);
 }
@@ -432,7 +432,7 @@ private struct ZipUnbox(C) if (is(C : Cursor))
     enum isSearchable = is(C : SearchableCursor);
 
     private C input;
-    private ArchiveExtractEntry currentEntry;
+    private UnboxEntry currentEntry;
     ubyte[] fieldBuf;
     ulong nextHeader;
 
@@ -466,7 +466,7 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         return !currentEntry;
     }
 
-    @property ArchiveExtractEntry front()
+    @property UnboxEntry front()
     {
         return currentEntry;
     }
@@ -734,7 +734,7 @@ private struct ZipUnbox(C) if (is(C : Cursor))
 
         nextHeader = input.pos + info.compressedSize;
 
-        currentEntry = new ZipArchiveExtractEntry!C(input, info);
+        currentEntry = new ZipUnboxEntry!C(input, info);
     }
 }
 
@@ -942,7 +942,7 @@ private struct ExtraFieldInfo
     }
 }
 
-private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor))
+private class ZipUnboxEntry(C) : UnboxEntry if (is(C : Cursor))
 {
     enum isSearchable = is(C : SearchableCursor);
 

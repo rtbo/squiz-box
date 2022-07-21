@@ -11,52 +11,43 @@ import std.range;
 public import squiz_box.box.tar;
 public import squiz_box.box.zip;
 
-/// A dynamic range of ArchiveCreateEntry
-alias CreateEntryRange = InputRange!ArchiveCreateEntry;
+/// A dynamic range of BoxEntry
+alias BoxEntryRange = InputRange!BoxEntry;
 
-/// A dynamic range of ArchiveExtractEntry
-alias ExtractEntryRange = InputRange!ArchiveExtractEntry;
+/// A dynamic range of UnboxEntry
+alias UnboxEntryRange = InputRange!UnboxEntry;
 
 /// A dynamic boxing algorithm
 interface BoxAlgo
 {
-    ByteRange box(CreateEntryRange entries);
+    ByteRange box(BoxEntryRange entries);
 }
 
 /// A dynamic unboxing algorithm
 interface UnboxAlgo
 {
-    ExtractEntryRange unbox(ByteRange bytes);
+    UnboxEntryRange unbox(ByteRange bytes);
 }
 
-/// Static check that a type is an InputRange of ArchiveCreateEntry
-template isCreateEntryRange(I)
+/// Static check that a type is an InputRange of BoxEntry
+template isBoxEntryRange(I)
 {
     import std.range : ElementType, isInputRange;
 
-    enum isCreateEntryRange = isInputRange!I && is(ElementType!I : ArchiveCreateEntry);
+    enum isBoxEntryRange = isInputRange!I && is(ElementType!I : BoxEntry);
 }
 
-/// Static check that a type is an InputRange of ArchiveCreateEntry
-template isCreateEntryForwardRange(I)
-{
-    import std.range : ElementType, isForwardRange;
+static assert(isBoxEntryRange!(BoxEntry[]));
 
-    enum isCreateEntryForwardRange = isForwardRange!I && is(ElementType!I : ArchiveCreateEntry);
-}
-
-static assert(isCreateEntryRange!(ArchiveCreateEntry[]));
-static assert(isCreateEntryForwardRange!(ArchiveCreateEntry[]));
-
-/// Static check that a type is an InputRange of ArchiveExtractEntry
-template isExtractEntryRange(I)
+/// Static check that a type is an InputRange of UnboxEntry
+template isUnboxEntryRange(I)
 {
     import std.range : ElementType, isInputRange;
 
-    enum isExtractEntryRange = isInputRange!I && is(ElementType!I : ArchiveExtractEntry);
+    enum isUnboxEntryRange = isInputRange!I && is(ElementType!I : UnboxEntry);
 }
 
-static assert(isExtractEntryRange!(ArchiveExtractEntry[]));
+static assert(isUnboxEntryRange!(UnboxEntry[]));
 
 /// Type of an archive entry
 enum EntryType
@@ -80,15 +71,15 @@ enum EntryMode
 
 /// Common interface to archive entry.
 /// Each type implementing ArchiveEntry is either for creation or for extraction, but not both.
-/// Entries for archive creation implement ArchiveCreateEntry.
+/// Entries for archive creation implement BoxEntry.
 /// Entries for archive extraction implement ArchiveExtractionEntry.
 ///
-/// Instances of ArchiveCreateEntry are typically instanciated directly by the user or by thin helpers (e.g. FileArchiveEntry)
-/// Instances of ArchiveExtractEntry are instantiated by the extraction algorithm and their final type is hidden.
+/// Instances of BoxEntry are typically instanciated directly by the user or by thin helpers (e.g. FileBoxEntry)
+/// Instances of UnboxEntry are instantiated by the extraction algorithm and their final type is hidden.
 interface ArchiveEntry
 {
-    /// Tell whether the entry is used for creation (ArchiveCreateEntry)
-    /// or extraction (ArchiveExtractEntry)
+    /// Tell whether the entry is used for creation (BoxEntry)
+    /// or extraction (UnboxEntry)
     @property EntryMode mode();
 
     /// The archive mode this entry is for.
@@ -141,7 +132,7 @@ interface ArchiveEntry
 }
 
 /// Interface of ArchiveEntry used to create archives
-interface ArchiveCreateEntry : ArchiveEntry
+interface BoxEntry : ArchiveEntry
 {
     /// A byte range to the content of the entry.
     /// Only relevant for regular files.
@@ -166,7 +157,7 @@ interface ArchiveCreateEntry : ArchiveEntry
 }
 
 /// Interface of ArchiveEntry used for archive extraction
-interface ArchiveExtractEntry : ArchiveEntry
+interface UnboxEntry : ArchiveEntry
 {
     /// The size occupied by the entry in the archive.
     @property ulong entrySize();
@@ -270,7 +261,7 @@ interface ArchiveExtractEntry : ArchiveEntry
 /// archiveBase must be a parent path from filename,
 /// such as the the path of the entry is filename, relative to archiveBase.
 /// prefix is prepended to the name of the file in the archive.
-ArchiveCreateEntry fileEntry(string filename, string archiveBase, string prefix = null)
+BoxEntry fileEntry(string filename, string archiveBase, string prefix = null)
 {
     import std.path : absolutePath, buildNormalizedPath, relativePath;
     import std.string : startsWith;
@@ -284,12 +275,12 @@ ArchiveCreateEntry fileEntry(string filename, string archiveBase, string prefix 
     if (prefix)
         pathInArchive = prefix ~ pathInArchive;
 
-    return new FileArchiveEntry(filename, pathInArchive);
+    return new FileBoxEntry(filename, pathInArchive);
 }
 
-/// File based implementation of ArchiveCreateEntry.
+/// File based implementation of BoxEntry.
 /// Used to create archives from files in the file system.
-class FileArchiveEntry : ArchiveCreateEntry
+class FileBoxEntry : BoxEntry
 {
     string filePath;
     string pathInArchive;

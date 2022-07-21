@@ -12,14 +12,14 @@ import std.range.primitives;
 /// Returns a Tar archive as a byte range
 /// corresponding to the entries in input.
 /// chunkSize must be a multiple of 512.
-auto createTarArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
-        if (isCreateEntryRange!I)
+auto boxTar(I)(I entries, size_t chunkSize = defaultChunkSize)
+        if (isBoxEntryRange!I)
 in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
-    return TarArchiveCreate!I(entries, chunkSize);
+    return TarBox!I(entries, chunkSize);
 }
 
-private struct TarArchiveCreate(I)
+private struct TarBox(I)
 {
     // init data
     I entriesInput;
@@ -30,7 +30,7 @@ private struct TarArchiveCreate(I)
     ubyte[] avail; // space available in buffer (after chunk)
 
     // current entry being processed
-    ArchiveCreateEntry entry;
+    BoxEntry entry;
     ByteRange entryChunks;
 
     // footer is two empty blocks
@@ -137,23 +137,23 @@ private struct TarArchiveCreate(I)
     }
 }
 
-static assert(isByteRange!(TarArchiveCreate!(ArchiveCreateEntry[])));
+static assert(isByteRange!(TarBox!(BoxEntry[])));
 
 /// Return a range of entries from a Tar formatted byte range
-auto readTarArchive(I)(I tarInput) if (isByteRange!I)
+auto unboxTar(I)(I tarInput) if (isByteRange!I)
 {
     auto dataInput = new ByteRangeCursor!I(tarInput);
-    return ArchiveTarRead(dataInput);
+    return TarUnbox(dataInput);
 }
 
-private struct ArchiveTarRead
+private struct TarUnbox
 {
     private Cursor _input;
 
     // current header data
     private size_t _next;
     private ubyte[] _block;
-    private ArchiveExtractEntry _entry;
+    private UnboxEntry _entry;
 
     this(Cursor input)
     {
@@ -170,7 +170,7 @@ private struct ArchiveTarRead
         return _input.eoi;
     }
 
-    @property ArchiveExtractEntry front()
+    @property UnboxEntry front()
     {
         return _entry;
     }
@@ -238,13 +238,13 @@ private struct ArchiveTarRead
             info.groupId = parseOctalString(th.gid);
         }
 
-        _entry = new ArchiveTarExtractEntry(_input, info);
+        _entry = new TarUnboxEntry(_input, info);
 
         _next = next512(_input.pos + info.size);
     }
 }
 
-static assert(isExtractEntryRange!ArchiveTarRead);
+static assert(isUnboxEntryRange!TarUnbox);
 
 struct TarEntryInfo
 {
@@ -263,7 +263,7 @@ struct TarEntryInfo
     }
 }
 
-private class ArchiveTarExtractEntry : ArchiveExtractEntry
+private class TarUnboxEntry : UnboxEntry
 {
     import std.stdio : File;
 
