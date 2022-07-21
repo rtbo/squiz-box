@@ -17,16 +17,15 @@ alias BoxEntryRange = InputRange!BoxEntry;
 /// A dynamic range of UnboxEntry
 alias UnboxEntryRange = InputRange!UnboxEntry;
 
-/// A dynamic boxing algorithm
+/// A dynamic interface to boxing/unboxing algorithm
 interface BoxAlgo
 {
-    ByteRange box(BoxEntryRange entries);
-}
+    /// Box the provided entries and return the associated byte range
+    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize);
 
-/// A dynamic unboxing algorithm
-interface UnboxAlgo
-{
+    /// Unbox the given byte range to a range of entries
     UnboxEntryRange unbox(ByteRange bytes);
+
 }
 
 /// Static check that a type is an InputRange of BoxEntry

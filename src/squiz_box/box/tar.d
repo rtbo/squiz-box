@@ -9,28 +9,30 @@ import std.exception;
 import std.path;
 import std.range;
 
-class TarAlgo : BoxAlgo, UnboxAlgo
+/// BoxAlgo for ".tar" files
+class TarAlgo : BoxAlgo
 {
-    ByteRange box(BoxEntryRange entries)
+    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
     {
-        auto bytes = entries.boxTar();
+        auto bytes = entries.boxTar(chunkSize);
         return inputRangeObject(bytes);
     }
 
     UnboxEntryRange unbox(ByteRange bytes)
     {
-        auto entries = bytes.unboxZip();
+        auto entries = bytes.unboxTar();
         return inputRangeObject(entries);
     }
 }
 
-class TarGzAlgo : BoxAlgo, UnboxAlgo
+/// BoxAlgo for ".tar.gz" files
+class TarGzAlgo : BoxAlgo
 {
-    ByteRange box(BoxEntryRange entries)
+    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
     {
         auto bytes = entries
-            .boxTar()
-            .deflateGz();
+            .boxTar(chunkSize)
+            .deflateGz(chunkSize);
         return inputRangeObject(bytes);
     }
 
@@ -38,20 +40,21 @@ class TarGzAlgo : BoxAlgo, UnboxAlgo
     {
         auto entries = bytes
             .inflateGz()
-            .unboxZip();
+            .unboxTar();
         return inputRangeObject(entries);
     }
 }
 
 version (HaveSquizBzip2)
 {
-    class TarBzip2Algo : BoxAlgo, UnboxAlgo
+    /// BoxAlgo for ".tar.bz2" files
+    class TarBzip2Algo : BoxAlgo
     {
-        ByteRange box(BoxEntryRange entries)
+        ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
         {
             auto bytes = entries
-                .boxTar()
-                .compressBzip2();
+                .boxTar(chunkSize)
+                .compressBzip2(chunkSize);
             return inputRangeObject(bytes);
         }
 
@@ -59,7 +62,7 @@ version (HaveSquizBzip2)
         {
             auto entries = bytes
                 .decompressBzip2()
-                .unboxZip();
+                .unboxTar();
             return inputRangeObject(entries);
         }
     }
@@ -67,13 +70,14 @@ version (HaveSquizBzip2)
 
 version (HaveSquizLzma)
 {
-    class TarXzAlgo : BoxAlgo, UnboxAlgo
+    /// BoxAlgo for ".tar.xz" files
+    class TarXzAlgo : BoxAlgo
     {
-        ByteRange box(BoxEntryRange entries)
+        ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
         {
             auto bytes = entries
-                .boxTar()
-                .compressXz();
+                .boxTar(chunkSize)
+                .compressXz(chunkSize);
             return inputRangeObject(bytes);
         }
 
@@ -81,7 +85,7 @@ version (HaveSquizLzma)
         {
             auto entries = bytes
                 .decompressXz()
-                .unboxZip();
+                .unboxTar();
             return inputRangeObject(entries);
         }
     }

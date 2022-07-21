@@ -10,11 +10,12 @@ import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
 
-class ZipAlgo : BoxAlgo, UnboxAlgo
+/// BoxAlgo for ".zip" files
+class ZipAlgo : BoxAlgo
 {
-    ByteRange box(BoxEntryRange entries)
+    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
     {
-        auto bytes = boxZip(entries);
+        auto bytes = boxZip(entries, chunkSize);
         return inputRangeObject(bytes);
     }
 
