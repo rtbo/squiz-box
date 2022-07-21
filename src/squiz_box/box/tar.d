@@ -7,7 +7,85 @@ import squiz_box.squiz;
 import std.datetime.systime;
 import std.exception;
 import std.path;
-import std.range.primitives;
+import std.range;
+
+class TarAlgo : BoxAlgo, UnboxAlgo
+{
+    ByteRange box(BoxEntryRange entries)
+    {
+        auto bytes = entries.boxTar();
+        return inputRangeObject(bytes);
+    }
+
+    UnboxEntryRange unbox(ByteRange bytes)
+    {
+        auto entries = bytes.unboxZip();
+        return inputRangeObject(entries);
+    }
+}
+
+class TarGzAlgo : BoxAlgo, UnboxAlgo
+{
+    ByteRange box(BoxEntryRange entries)
+    {
+        auto bytes = entries
+            .boxTar()
+            .deflateGz();
+        return inputRangeObject(bytes);
+    }
+
+    UnboxEntryRange unbox(ByteRange bytes)
+    {
+        auto entries = bytes
+            .inflateGz()
+            .unboxZip();
+        return inputRangeObject(entries);
+    }
+}
+
+version (HaveSquizBzip2)
+{
+    class TarBzip2Algo : BoxAlgo, UnboxAlgo
+    {
+        ByteRange box(BoxEntryRange entries)
+        {
+            auto bytes = entries
+                .boxTar()
+                .compressBzip2();
+            return inputRangeObject(bytes);
+        }
+
+        UnboxEntryRange unbox(ByteRange bytes)
+        {
+            auto entries = bytes
+                .decompressBzip2()
+                .unboxZip();
+            return inputRangeObject(entries);
+        }
+    }
+}
+
+version (HaveSquizLzma)
+{
+    class TarXzAlgo : BoxAlgo, UnboxAlgo
+    {
+        ByteRange box(BoxEntryRange entries)
+        {
+            auto bytes = entries
+                .boxTar()
+                .compressXz();
+            return inputRangeObject(bytes);
+        }
+
+        UnboxEntryRange unbox(ByteRange bytes)
+        {
+            auto entries = bytes
+                .decompressXz()
+                .unboxZip();
+            return inputRangeObject(entries);
+        }
+    }
+}
 
 /// Returns a Tar archive as a byte range
 /// corresponding to the entries in input.
