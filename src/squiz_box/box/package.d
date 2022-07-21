@@ -23,8 +23,22 @@ interface BoxAlgo
     /// Box the provided entries and return the associated byte range
     ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize);
 
+    /// ditto
+    ByteRange box(I)(I entries, size_t chunkSize = defaultChunkSize)
+    if (isBoxEntryRange!I && !is(I == BoxEntryRange))
+    {
+        return box(inputRangeObject(entries), chunkSize);
+    }
+
     /// Unbox the given byte range to a range of entries
     UnboxEntryRange unbox(ByteRange bytes);
+
+    /// ditto
+    UnboxEntryRange unbox(I)(I bytes)
+    if (isByteRange!I && !is(I == ByteRange))
+    {
+        return unbox(inputRangeObject(bytes));
+    }
 
     static BoxAlgo forFilename(string filename)
     {

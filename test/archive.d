@@ -375,9 +375,7 @@ unittest
 
     auto algo = BoxAlgo.forFilename(dm.path);
 
-    auto entries = inputRangeObject(filesForArchive().map!(p => fileEntry(p, base)));
-
-    algo.box(entries)
+    algo.box(filesForArchive().map!(p => fileEntry(p, base)))
         .writeBinaryFile(dm.path);
 
     testZipArchiveContent(dm.path);
@@ -398,8 +396,7 @@ version (HaveSquizLzma)
         mkdir(dm.path);
 
         auto algo = BoxAlgo.forFilename(archive);
-        auto bytes = inputRangeObject(readBinaryFile(archive));
-        auto entries = algo.unbox(bytes);
+        auto entries = algo.unbox(readBinaryFile(archive));
         entries.each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);
