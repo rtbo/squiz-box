@@ -2,37 +2,15 @@
 
 A D library that handles compression / decompression and archiving.
 
-## Download, build, install
+In the Squiz-Box terminology, `squiz` refers to compression/decompression, while `box` refers to
+archiving. Squiz-Box API consists almost exclusively on range algorithms.
+`squiz` related algorithms map a range of bytes to another range of bytes where one is the compressed stream of the other. `box` and `unbox` related algorithms map a range of file entries to/from a range of bytes.
 
-To use `squiz-box`, the easiest is to use the Dub package from the registry.
-On Linux, you will need `liblzma` and `libbz2` installed.
-On Windows, a compiled copy of these libraries is shipped with the package (only Windows 64 bit is supported).
-
-Squiz-box is developped with Meson, which will build the C libraries if they are not found.
-If you want to use squiz-box in a Meson project, you can use it as a subproject.
-
-To build, test on Linux:
-```sh
-meson builddir -Ddefault_library=static
-cd builddir
-ninja && ./squiz-test
-```
-
-To build test on Windows:
-```dos
-rem Visual Studio prompt is required
-rem A script is provided to help this (needs vswhere)
-win_env_vs.bat
-meson builddir -Ddefault_library=static
-cd builddir
-ninja && squiz-test.exe
-```
-
+Squiz-Box provides both compile time known structures and dynamic types over all algorithms.
 ## Compression / decompression
 
-The compression is designed to work with ranges, which makes it suitable
-for streaming and for transforming data from any kind of source to
-any kind of destination.
+The range based design makes _squizing_ suiatble for streaming and for
+transforming data from any kind of source to any kind of destination.
 
 ### Algorithms and formats
 
@@ -40,7 +18,7 @@ An algorithm refers to the compression algorithm properly, and format refers
 to a header and a trailer attached to the compressed data that gives information
 about decompression parameters and integrity checking.
 A raw format refers to data compressed without such header and trailer and can
-be used inside an externally defined format (e.g. zip, 7z, ...).
+be used only in applications or archive that know how to decompress the stream by other means.
 
 | Algorithms | Squiz structs | Available formats |
 |-----|----|----|
@@ -58,7 +36,7 @@ the compression ratio:
   - higher compression of repetitive binary data such as audio PCM, RGB...
 - BCJ (Branch/Call/Jump)
   - higher compression of compiled executable
-  - available for a different architectures (X86, ARM, ...)
+  - available for different architectures (X86, ARM, ...)
 
 ### API
 
@@ -72,7 +50,7 @@ The `squiz` function works for both compression and decompression and there are 
 helpers built upon it (`deflate`, `inflate`, `compressXz`, ...).
 See code examples below for usage.
 
-## Archiving
+## Archiving (Boxing)
 
 Whenever possible, archving and de-archiving are implemented as the
 transformation of a range of file entries to a range of bytes.
@@ -133,8 +111,8 @@ const root = buildNormalizedPath(someDir);
 
 dirEntries(root, SpanMode.breadth, false)
     .filter!(e => !e.isDir)
-    .map!(e => fileEntry(e.name, root, null))    // range of FileEntry
-    .createZipArchive()                          // range of bytes
+    .map!(e => fileEntry(e.name, root, null))    // range of FileBoxEntry
+    .boxZip()                                    // range of bytes
     .writeBinaryFile("some-dir.zip");
 ```
 
@@ -176,8 +154,62 @@ mkdir(extractionSite);
 
 readBinaryFile(archive)
     .inflateGz()
-    .unboxTar()
+    .unboxTar()                               // range of UnboxEntry
     .each!(e => e.extractTo(extractionSite));
+```
+
+### Compression/Decompression with algorithm known at runtime
+
+```d
+import squiz_box;
+
+// SquizAlgo is a D interface
+// it must be instantiated from a compile-time known algorithm
+SquizAlgo algo = squizAlgo(Deflate.init);
+
+// the rest is the same as previously
+
+const ubyte[] data = myDataToCompress();
+
+only(data)
+  .squiz(algo)
+  .sendOverNetwork();
+```
+
+### Boxing/Unboxing with algorithm known at runtime
+
+```d
+import squiz_box;
+
+import std.algorithm;
+import std.file;
+import std.path;
+
+const filename = "squiz-box-12.5.tar.xz";
+
+/// BoxAlgo is a D interface
+/// It can be instantiated from a filename with archive extension
+/// or directly with the implementing classes (ZipBox, TarXzBox, ...)
+BoxAlgo algo = BoxAlgo.fromFilename(filename);
+
+/// the rest is (almost) the same as before
+
+const root = squizBoxDir;
+
+// prefix all files path in the archive
+// don't forget the trailing '/'!
+const prefix = "squiz-box-12.5/";
+
+const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
+
+// no need to collect entries in an array
+auto entries = dirEntries(root, SpanMode.breadth, false)
+    .filter!(e => !e.isDir)
+    .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
+    .map!(e => fileEntry(e.name, root, prefix));
+
+// algo.box is a template function that can receive any range of BoxEntry
+algo.box(entries).writeBinaryFile(filename);
 ```
 
 ### Full control over the streaming process
@@ -189,6 +221,7 @@ a D range is probably not well suited to receive the data from a different
 thread. In that situation you can use the streaming API directly.
 
 The following code gives the spirit of it.
+
 ```d
 import squiz_box;
 
@@ -210,4 +243,31 @@ algo.reset(stream);
 
 // finally we can release the resources
 algo.end(stream);
+```
+
+
+## Download, build, install
+
+To use `squiz-box`, the easiest is to use the Dub package from the registry.
+On Linux, you will need `liblzma`, `libbz2` and `libzstd` installed.
+On Windows, a compiled copy of these libraries is shipped with the package (only Windows 64 bit is supported).
+
+Squiz-box is developped with Meson, which will build the C libraries if they are not found.
+If you want to use squiz-box in a Meson project, you can should it as a subproject.
+
+To build, test on Linux:
+```sh
+meson builddir -Ddefault_library=static
+cd builddir
+ninja && ./squiz-test
+```
+
+To build test on Windows:
+```dos
+rem Visual Studio prompt is required
+rem A script is provided to help this (needs vswhere)
+win_env_vs.bat
+meson builddir -Ddefault_library=static
+cd builddir
+ninja && squiz-test.exe
 ```
