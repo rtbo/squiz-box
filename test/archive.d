@@ -134,7 +134,7 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createTarArchive()
+        .boxTar()
         .writeBinaryFile(archive.path);
 
     version (Windows)
@@ -187,7 +187,7 @@ unittest
 
     const readEntries = File(path, "rb")
         .byChunk(defaultChunkSize)
-        .readTarArchive()
+        .unboxTar()
         .map!((entry) {
             const content = entry.readContent();
             return Entry(
@@ -214,7 +214,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .readTarArchive()
+        .unboxTar()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
@@ -233,7 +233,7 @@ unittest
 
     readBinaryFile(archive)
         .inflateGz()
-        .readTarArchive()
+        .unboxTar()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
@@ -254,7 +254,7 @@ version (HaveSquizBzip2)
 
         readBinaryFile(archive)
             .decompressBzip2()
-            .readTarArchive()
+            .unboxTar()
             .each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);
@@ -276,7 +276,7 @@ version (HaveSquizLzma)
 
         readBinaryFile(archive)
             .decompressXz()
-            .readTarArchive()
+            .unboxTar()
             .each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);
@@ -294,7 +294,7 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createZipArchive()
+        .boxZip()
         .writeBinaryFile(archive.path);
 
     version (Windows)
@@ -315,7 +315,7 @@ unittest
     mkdir(dm.path);
 
     readBinaryFile(archive)
-        .readZipArchive()
+        .unboxZip()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, No.mode666);
@@ -334,7 +334,7 @@ unittest
     mkdir(dm.path);
 
     auto entries = File(archive, "rb")
-        .readZipArchive()
+        .unboxZip()
         .array;
 
     entries[2].extractTo(dm.path);
@@ -357,9 +357,48 @@ unittest
 
     filesForArchive()
         .map!(p => fileEntry(p, base))
-        .createZipArchive()
-        .readZipArchive()
+        .boxZip()
+        .unboxZip()
         .each!(e => e.extractTo(dm.path));
 
     testExtractedFiles(dm, Yes.mode666);
+}
+
+@("BoxAlgo.box")
+unittest
+{
+    import std.algorithm : map;
+    import std.range : inputRangeObject;
+
+    const dm = DeleteMe("dest", ".zip");
+    auto base = dataGenPath();
+
+    auto algo = BoxAlgo.forFilename(dm.path);
+
+    algo.box(filesForArchive().map!(p => fileEntry(p, base)))
+        .writeBinaryFile(dm.path);
+
+    testZipArchiveContent(dm.path);
+}
+
+version (HaveSquizLzma)
+{
+    @("BoxAlgo.unbox")
+    unittest
+    {
+        import std.algorithm : each;
+        import std.file : mkdir;
+        import std.range : inputRangeObject;
+
+        const archive = testPath("data/archive.tar.xz");
+        const dm = DeleteMe("extraction_site", null);
+
+        mkdir(dm.path);
+
+        auto algo = BoxAlgo.forFilename(archive);
+        auto entries = algo.unbox(readBinaryFile(archive));
+        entries.each!(e => e.extractTo(dm.path));
+
+        testExtractedFiles(dm, Yes.mode666);
+    }
 }

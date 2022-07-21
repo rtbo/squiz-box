@@ -10,13 +10,29 @@ import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
 
-auto createZipArchive(I)(I entries, size_t chunkSize = defaultChunkSize)
-        if (isCreateEntryRange!I)
+/// BoxAlgo for ".zip" files
+class ZipAlgo : BoxAlgo
 {
-    return ZipArchiveCreate!I(entries, chunkSize);
+    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+    {
+        auto bytes = boxZip(entries, chunkSize);
+        return inputRangeObject(bytes);
+    }
+
+    UnboxEntryRange unbox(ByteRange bytes)
+    {
+        auto entries = unboxZip(bytes);
+        return inputRangeObject(entries);
+    }
 }
 
-private struct ZipArchiveCreate(I)
+auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
+        if (isBoxEntryRange!I)
+{
+    return ZipBox!I(entries, chunkSize);
+}
+
+private struct ZipBox(I)
 {
     private I entries;
 
@@ -394,30 +410,30 @@ private class Deflater
     }
 }
 
-auto readZipArchive(I)(I input) if (isByteRange!I)
+auto unboxZip(I)(I input) if (isByteRange!I)
 {
     auto stream = new ByteRangeCursor!I(input);
-    return ZipArchiveRead!Cursor(stream);
+    return ZipUnbox!Cursor(stream);
 }
 
-auto readZipArchive(File input)
+auto unboxZip(File input)
 {
     auto stream = new FileCursor(input);
-    return ZipArchiveRead!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream);
 }
 
-auto readZipArchive(ubyte[] zipData)
+auto unboxZip(ubyte[] zipData)
 {
     auto stream = new ArrayCursor(zipData);
-    return ZipArchiveRead!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream);
 }
 
-private struct ZipArchiveRead(C) if (is(C : Cursor))
+private struct ZipUnbox(C) if (is(C : Cursor))
 {
     enum isSearchable = is(C : SearchableCursor);
 
     private C input;
-    private ArchiveExtractEntry currentEntry;
+    private UnboxEntry currentEntry;
     ubyte[] fieldBuf;
     ulong nextHeader;
 
@@ -451,7 +467,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
         return !currentEntry;
     }
 
-    @property ArchiveExtractEntry front()
+    @property UnboxEntry front()
     {
         return currentEntry;
     }
@@ -719,7 +735,7 @@ private struct ZipArchiveRead(C) if (is(C : Cursor))
 
         nextHeader = input.pos + info.compressedSize;
 
-        currentEntry = new ZipArchiveExtractEntry!C(input, info);
+        currentEntry = new ZipUnboxEntry!C(input, info);
     }
 }
 
@@ -927,7 +943,7 @@ private struct ExtraFieldInfo
     }
 }
 
-private class ZipArchiveExtractEntry(C) : ArchiveExtractEntry if (is(C : Cursor))
+private class ZipUnboxEntry(C) : UnboxEntry if (is(C : Cursor))
 {
     enum isSearchable = is(C : SearchableCursor);
 
