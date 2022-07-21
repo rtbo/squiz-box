@@ -253,7 +253,7 @@ On Linux, you will need `liblzma`, `libbz2` and `libzstd` installed.
 On Windows, a compiled copy of these libraries is shipped with the package (only Windows 64 bit is supported).
 
 Squiz-box is developped with Meson, which will build the C libraries if they are not found.
-If you want to use squiz-box in a Meson project, you can should it as a subproject.
+If you want to use squiz-box in a Meson project, you should use it as a subproject.
 
 To build, test on Linux:
 ```sh
