@@ -302,6 +302,15 @@ private struct TarUnbox
                 "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
         );
 
+        if (th.typeflag == Typeflag.posixExtended || th.typeflag == Typeflag.extended)
+        {
+            // skipping extended Tar headers
+            const sz = next512(parseOctalString!size_t(th.size));
+            _input.ffw(sz);
+            readHeaderBlock();
+            return;
+        }
+
         TarEntryInfo info;
         info.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
         info.type = toEntryType(th.typeflag);
@@ -570,6 +579,8 @@ private enum Typeflag : ubyte
     directory = '5',
     fifo = '6',
     contiguousFile = '7',
+    posixExtended = 'g',
+    extended = 'x',
 }
 
 Typeflag toTypeflag(EntryType type)
