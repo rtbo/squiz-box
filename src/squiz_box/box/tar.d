@@ -604,8 +604,9 @@ version (Posix)
     uint posixModeFileType(Typeflag flag)
     {
         import std.conv : octal;
+        import std.format : format;
 
-        final switch (flag)
+        switch (flag)
         {
         case Typeflag.normalNul:
         case Typeflag.normal:
@@ -626,6 +627,8 @@ version (Posix)
         case Typeflag.contiguousFile:
             // is regular file right for contiguous files?
             return octal!100_000;
+        default:
+            throw new Exception(format!"Unexpected Tar entry type: '%s'"(cast(char)flag));
         }
     }
 }
