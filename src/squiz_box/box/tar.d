@@ -30,17 +30,13 @@ class TarGzAlgo : BoxAlgo
 {
     ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
     {
-        auto bytes = entries
-            .boxTar(chunkSize)
-            .deflateGz(chunkSize);
+        auto bytes = entries.boxTarGz(chunkSize);
         return inputRangeObject(bytes);
     }
 
     UnboxEntryRange unbox(ByteRange bytes)
     {
-        auto entries = bytes
-            .inflateGz()
-            .unboxTar();
+        auto entries = bytes.unboxTarGz();
         return inputRangeObject(entries);
     }
 }
@@ -52,17 +48,13 @@ version (HaveSquizBzip2)
     {
         ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
         {
-            auto bytes = entries
-                .boxTar(chunkSize)
-                .compressBzip2(chunkSize);
+            auto bytes = entries.boxTarBzip2(chunkSize);
             return inputRangeObject(bytes);
         }
 
         UnboxEntryRange unbox(ByteRange bytes)
         {
-            auto entries = bytes
-                .decompressBzip2()
-                .unboxTar();
+            auto entries = bytes.unboxTarBzip2();
             return inputRangeObject(entries);
         }
     }
@@ -75,23 +67,19 @@ version (HaveSquizLzma)
     {
         ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
         {
-            auto bytes = entries
-                .boxTar(chunkSize)
-                .compressXz(chunkSize);
+            auto bytes = entries.boxTarXz(chunkSize);
             return inputRangeObject(bytes);
         }
 
         UnboxEntryRange unbox(ByteRange bytes)
         {
-            auto entries = bytes
-                .decompressXz()
-                .unboxTar();
+            auto entries = bytes.unboxTarXz();
             return inputRangeObject(entries);
         }
     }
 }
 
-/// Returns a Tar archive as a byte range
+/// Returns a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` archive as a byte range
 /// corresponding to the entries in input.
 /// chunkSize must be a multiple of 512.
 auto boxTar(I)(I entries, size_t chunkSize = defaultChunkSize)
@@ -99,6 +87,30 @@ auto boxTar(I)(I entries, size_t chunkSize = defaultChunkSize)
 in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
     return TarBox!I(entries, chunkSize);
+}
+
+/// ditto
+auto boxTarGz(I)(I entries, size_t chunkSize = defaultChunkSize)
+{
+    return boxTar(entries, chunkSize).deflateGz(chunkSize);
+}
+
+version (HaveSquizBzip2)
+{
+    /// ditto
+    auto boxTarBzip2(I)(I entries, size_t chunkSize = defaultChunkSize)
+    {
+        return boxTar(entries, chunkSize).compressBzip2(chunkSize);
+    }
+}
+
+version (HaveSquizLzma)
+{
+    /// ditto
+    auto boxTarXz(I)(I entries, size_t chunkSize = defaultChunkSize)
+    {
+        return boxTar(entries, chunkSize).compressXz(chunkSize);
+    }
 }
 
 private struct TarBox(I)
@@ -221,11 +233,35 @@ private struct TarBox(I)
 
 static assert(isByteRange!(TarBox!(BoxEntry[])));
 
-/// Return a range of entries from a Tar formatted byte range
-auto unboxTar(I)(I tarInput) if (isByteRange!I)
+/// Returns a range of entries from a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` formatted byte range
+auto unboxTar(I)(I input) if (isByteRange!I)
 {
-    auto dataInput = new ByteRangeCursor!I(tarInput);
+    auto dataInput = new ByteRangeCursor!I(input);
     return TarUnbox(dataInput);
+}
+
+/// ditto
+auto unboxTarGz(I)(I input)
+{
+    return input.inflateGz().unboxTar();
+}
+
+version (HaveSquizBzip2)
+{
+    /// ditto
+    auto unboxTarBzip2(I)(I input)
+    {
+        return input.decompressBzip2().unboxTar();
+    }
+}
+
+version (HaveSquizLzma)
+{
+    /// ditto
+    auto unboxTarXz(I)(I input)
+    {
+        return input.decompressXz().unboxTar();
+    }
 }
 
 private struct TarUnbox
@@ -639,7 +675,7 @@ version (Posix)
             // is regular file right for contiguous files?
             return octal!100_000;
         default:
-            throw new Exception(format!"Unexpected Tar entry type: '%s'"(cast(char)flag));
+            throw new Exception(format!"Unexpected Tar entry type: '%s'"(cast(char) flag));
         }
     }
 }
