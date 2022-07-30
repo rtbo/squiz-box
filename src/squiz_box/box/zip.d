@@ -1228,21 +1228,26 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
 
             stream.output = chunkBuffer[chunk.length .. $];
 
-            ended = algo.process(stream, cast(Flag!"lastChunk") input.eoi);
+            ended = algo.process(stream, cast(Flag!"lastChunk")(compressedSz == 0));
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
 
-            calculatedCrc32 = crc32(calculatedCrc32, chunk.ptr, cast(uint) chunk.length);
-
             if (ended)
-            {
-                enforce(
-                    calculatedCrc32 == expectedCrc32,
-                    "Corrupted Zip file: Wrong CRC32 checkum"
-                );
-                algo.end(stream);
                 break;
-            }
+        }
+
+        calculatedCrc32 = crc32(calculatedCrc32, chunk.ptr, cast(uint) chunk.length);
+
+        if (ended)
+        {
+            import std.format : format;
+
+            enforce(compressedSz == 0, "Inflate ended before end of input");
+            enforce(
+                calculatedCrc32 == expectedCrc32,
+                format!"calculated = 0x%08x / expected = 0x%08x"(calculatedCrc32, expectedCrc32)
+            );
+            algo.end(stream);
         }
     }
 }
