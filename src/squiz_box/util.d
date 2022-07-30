@@ -11,6 +11,14 @@ auto readBinaryFile(string filename, size_t chunkSize = defaultChunkSize)
     return ByChunkImpl(File(filename, "rb"), chunkSize);
 }
 
+/// ditto
+auto readBinaryFile(string filename, ubyte[] buffer)
+{
+    import std.stdio : File;
+
+    return ByChunkImpl(File(filename, "rb"), buffer);
+}
+
 /// Helper that eagerly writes binary chunks of data to a file.
 void writeBinaryFile(I)(I input, string filename) if (isByteRange!I)
 {
