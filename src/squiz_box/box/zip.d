@@ -9,6 +9,7 @@ import std.exception;
 import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
+import std.string;
 
 /// BoxAlgo for ".zip" files
 class ZipAlgo : BoxAlgo
@@ -130,13 +131,6 @@ private struct ZipBox(I)
         currentDeflated = deflater.deflated;
 
         string path = entry.path;
-
-        version (Windows)
-        {
-            import std.string : replace;
-
-            path = replace(path, '\\', '/');
-        }
 
         ushort extractVersion = 20;
         bool zip64;
@@ -735,6 +729,9 @@ private struct ZipUnbox(C) if (is(C : Cursor))
 
         nextHeader = input.pos + info.compressedSize;
 
+        version (Windows)
+            info.path = info.path.replace('\\', '/');
+
         currentEntry = new ZipUnboxEntry!C(input, info);
     }
 }
@@ -1245,7 +1242,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
             enforce(compressedSz == 0, "Inflate ended before end of input");
             enforce(
                 calculatedCrc32 == expectedCrc32,
-                format!"calculated = 0x%08x / expected = 0x%08x"(calculatedCrc32, expectedCrc32)
+                "CRC32 verification failed. Archive is may be corrupted",
             );
             algo.end(stream);
         }
