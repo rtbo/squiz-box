@@ -1242,7 +1242,7 @@ private class InflateByChunk(C) : ZipByChunk if (is(C : Cursor))
             enforce(compressedSz == 0, "Inflate ended before end of input");
             enforce(
                 calculatedCrc32 == expectedCrc32,
-                format!"calculated = 0x%08x / expected = 0x%08x"(calculatedCrc32, expectedCrc32)
+                "CRC32 verification failed. Archive is may be corrupted",
             );
             algo.end(stream);
         }
