@@ -402,3 +402,32 @@ version (HaveSquizLzma)
         testExtractedFiles(dm, Yes.mode666);
     }
 }
+
+@("Extract squiz-box.zip")
+unittest
+{
+    import std.algorithm;
+    import std.file;
+    import std.net.curl;
+    import std.path;
+    import std.range;
+    import std.stdio;
+
+    const url = "https://github.com/rtbo/squiz-box/archive/refs/tags/v0.2.1.zip";
+
+    auto file = buildPath(tempDir(), "squiz-box-0.2.1.zip");
+    auto dir = buildPath(tempDir(), "squiz-box-0.2.1");
+
+    download(url, file);
+    scope (exit)
+        remove(file);
+
+    mkdirRecurse(dir);
+    scope (exit)
+        rmdirRecurse(dir);
+
+    unboxZip(File(file, "rb"))
+        .each!(e => e.extractTo(dir));
+
+    assert(isFile(buildPath(dir, "squiz-box-0.2.1", "meson.build")));
+}
