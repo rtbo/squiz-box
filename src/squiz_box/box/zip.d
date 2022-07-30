@@ -9,6 +9,7 @@ import std.exception;
 import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
+import std.string;
 
 /// BoxAlgo for ".zip" files
 class ZipAlgo : BoxAlgo
@@ -130,13 +131,6 @@ private struct ZipBox(I)
         currentDeflated = deflater.deflated;
 
         string path = entry.path;
-
-        version (Windows)
-        {
-            import std.string : replace;
-
-            path = replace(path, '\\', '/');
-        }
 
         ushort extractVersion = 20;
         bool zip64;
@@ -734,6 +728,9 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         }
 
         nextHeader = input.pos + info.compressedSize;
+
+        version (Windows)
+            info.path = info.path.replace('\\', '/');
 
         currentEntry = new ZipUnboxEntry!C(input, info);
     }

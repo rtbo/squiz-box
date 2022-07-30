@@ -8,6 +8,7 @@ import std.datetime.systime;
 import std.exception;
 import std.path;
 import std.range;
+import std.string;
 
 /// BoxAlgo for ".tar" files
 class TarAlgo : BoxAlgo
@@ -364,6 +365,9 @@ private struct TarUnbox
             info.ownerId = parseOctalString(th.uid);
             info.groupId = parseOctalString(th.gid);
         }
+
+        version(Windows)
+            info.path = info.path.replace('\\', '/');
 
         _entry = new TarUnboxEntry(_input, info);
 

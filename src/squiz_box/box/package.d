@@ -25,7 +25,7 @@ interface BoxAlgo
 
     /// ditto
     ByteRange box(I)(I entries, size_t chunkSize = defaultChunkSize)
-    if (isBoxEntryRange!I && !is(I == BoxEntryRange))
+            if (isBoxEntryRange!I && !is(I == BoxEntryRange))
     {
         return box(inputRangeObject(entries), chunkSize);
     }
@@ -34,8 +34,7 @@ interface BoxAlgo
     UnboxEntryRange unbox(ByteRange bytes);
 
     /// ditto
-    UnboxEntryRange unbox(I)(I bytes)
-    if (isByteRange!I && !is(I == ByteRange))
+    UnboxEntryRange unbox(I)(I bytes) if (isByteRange!I && !is(I == ByteRange))
     {
         return unbox(inputRangeObject(bytes));
     }
@@ -53,7 +52,8 @@ interface BoxAlgo
             {
                 return new TarXzAlgo();
             }
-            else {
+            else
+            {
                 assert(false, "Squiz-Box built without LZMA support");
             }
         }
@@ -71,7 +71,8 @@ interface BoxAlgo
             {
                 return new TarBzip2Algo();
             }
-            else {
+            else
+            {
                 assert(false, "Squiz-Box built without Bzip2 support");
             }
         }
@@ -136,6 +137,7 @@ interface ArchiveEntry
     /// The archive mode this entry is for.
     /// The path of the entry within the archive.
     /// Should always be a relative path, and never go backward (..)
+    /// The directory separations are always '/' (forward slash) even on Windows
     @property string path();
 
     /// The type of entry (directory, file, symlink)
@@ -254,7 +256,7 @@ interface UnboxEntry : ArchiveEntry
 
         string entryPath = this.path;
 
-        if(removePrefix)
+        if (removePrefix)
         {
             enforce(
                 entryPath.startsWith(removePrefix),
@@ -333,7 +335,7 @@ interface UnboxEntry : ArchiveEntry
 BoxEntry fileEntry(string filename, string archiveBase, string prefix = null)
 {
     import std.path : absolutePath, buildNormalizedPath, relativePath;
-    import std.string : startsWith;
+    import std.string : replace, startsWith;
 
     const fn = buildNormalizedPath(absolutePath(filename));
     const ab = buildNormalizedPath(absolutePath(archiveBase));
@@ -343,6 +345,9 @@ BoxEntry fileEntry(string filename, string archiveBase, string prefix = null)
     auto pathInArchive = relativePath(fn, ab);
     if (prefix)
         pathInArchive = prefix ~ pathInArchive;
+
+    version (Windows)
+        pathInArchive = pathInArchive.replace('\\', '/');
 
     return new FileBoxEntry(filename, pathInArchive);
 }
