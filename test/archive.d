@@ -419,17 +419,15 @@ unittest
     auto dir = buildPath(tempDir(), "squiz-box-0.2.1");
 
     download(url, file);
-    // scope(exit)
-    //     remove(file);
+    scope (exit)
+        remove(file);
 
     mkdirRecurse(dir);
-    // scope(exit)
-    //     rmdirRecurse(dir);
+    scope (exit)
+        rmdirRecurse(dir);
 
-    readBinaryFile(file)
-        .unboxZip()
-        .tee!(e => writeln(e.path))
+    unboxZip(File(file, "rb"))
         .each!(e => e.extractTo(dir));
 
-    assert(isFile(buildPath(dir, "meson.build")));
+    assert(isFile(buildPath(dir, "squiz-box-0.2.1", "meson.build")));
 }
