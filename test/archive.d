@@ -427,7 +427,7 @@ unittest
         rmdirRecurse(dir);
 
     unboxZip(File(file, "rb"))
-        .each!(e => e.extractTo(dir));
+        .each!(e => e.extractTo(dir, "squiz-box-0.2.1/"));
 
-    assert(isFile(buildPath(dir, "squiz-box-0.2.1", "meson.build")));
+    assert(isFile(buildPath(dir, "meson.build")));
 }

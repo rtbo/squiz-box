@@ -235,11 +235,14 @@ interface UnboxEntry : ArchiveEntry
     }
 
     /// Extract the entry to a file under the given base directory
-    final void extractTo(string baseDirectory)
+    /// `removePrefix`, if specified can remove a prefix from the entry path.
+    final void extractTo(string baseDirectory, string removePrefix = null)
     {
         import std.file : exists, isDir, mkdirRecurse, setAttributes, setTimes;
+        import std.format : format;
         import std.path : buildNormalizedPath, dirName;
         import std.stdio : File;
+        import std.string : startsWith;
 
         assert(exists(baseDirectory) && isDir(baseDirectory));
 
@@ -249,7 +252,22 @@ interface UnboxEntry : ArchiveEntry
                 this.path ~ " - outside of extraction directory).",
         );
 
-        const extractPath = buildNormalizedPath(baseDirectory, this.path);
+        string entryPath = this.path;
+
+        if(removePrefix)
+        {
+            enforce(
+                entryPath.startsWith(removePrefix),
+                format!`prefix "%s" do not match path "%s"`(removePrefix, entryPath)
+            );
+
+            entryPath = entryPath[removePrefix.length .. $];
+        }
+
+        const extractPath = buildNormalizedPath(baseDirectory, entryPath);
+
+        if (removePrefix && extractPath.length == 0)
+            return;
 
         final switch (this.type)
         {
