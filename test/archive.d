@@ -364,7 +364,7 @@ unittest
     testExtractedFiles(dm, Yes.mode666);
 }
 
-@("BoxAlgo.box")
+@("box")
 unittest
 {
     import std.algorithm : map;
@@ -385,7 +385,7 @@ unittest
 
 version (HaveSquizLzma)
 {
-    @("BoxAlgo.unbox")
+    @("unbox")
     unittest
     {
         import std.algorithm : each;
