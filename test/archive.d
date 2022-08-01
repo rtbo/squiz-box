@@ -434,8 +434,8 @@ unittest
             rmdirRecurse(dir);
     }
 
-    unboxZip(File(file, "rb"))
-        .each!(e => e.extractTo(dir, "squiz-box-0.2.1/"));
+    unboxZip(File(file, "rb"), Yes.removePrefix)
+        .each!(e => e.extractTo(dir));
 
     assert(isFile(buildPath(dir, "meson.build")));
 }

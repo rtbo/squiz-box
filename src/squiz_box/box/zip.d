@@ -10,6 +10,7 @@ import std.traits : isIntegral;
 import std.range;
 import std.stdio : File;
 import std.string;
+import std.typecons;
 
 /// BoxAlgo for ".zip" files
 struct ZipAlgo
@@ -20,10 +21,10 @@ struct ZipAlgo
         return ZipBox!I(entries, chunkSize);
     }
 
-    auto unbox(I)(I input) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
     {
         auto stream = new ByteRangeCursor!I(input);
-        return ZipUnbox!Cursor(stream);
+        return ZipUnbox!Cursor(stream, removePrefix);
     }
 }
 
@@ -35,22 +36,22 @@ auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
     return ZipBox!I(entries, chunkSize);
 }
 
-auto unboxZip(I)(I input) if (isByteRange!I)
+auto unboxZip(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
 {
     auto stream = new ByteRangeCursor!I(input);
-    return ZipUnbox!Cursor(stream);
+    return ZipUnbox!Cursor(stream, removePrefix);
 }
 
-auto unboxZip(File input)
+auto unboxZip(File input, Flag!"removePrefix" removePrefix = No.removePrefix)
 {
     auto stream = new FileCursor(input);
-    return ZipUnbox!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream, removePrefix);
 }
 
-auto unboxZip(ubyte[] zipData)
+auto unboxZip(ubyte[] zipData, Flag!"removePrefix" removePrefix = No.removePrefix)
 {
     auto stream = new ArrayCursor(zipData);
-    return ZipUnbox!SearchableCursor(stream);
+    return ZipUnbox!SearchableCursor(stream, removePrefix);
 }
 
 private struct ZipBox(I)
@@ -432,6 +433,8 @@ private struct ZipUnbox(C) if (is(C : Cursor))
     private UnboxEntry currentEntry;
     ubyte[] fieldBuf;
     ulong nextHeader;
+    Flag!"removePrefix" removePrefix;
+    string prefix;
 
     static if (isSearchable)
     {
@@ -445,9 +448,11 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         ZipEntryInfo[string] centralDirectory;
     }
 
-    this(C input)
+    this(C input, Flag!"removePrefix" removePrefix)
     {
         this.input = input;
+        this.removePrefix = removePrefix;
+
         fieldBuf = new ubyte[ushort.max];
 
         static if (isSearchable)
@@ -733,6 +738,25 @@ private struct ZipUnbox(C) if (is(C : Cursor))
 
         version (Windows)
             info.path = info.path.replace('\\', '/');
+
+        if (removePrefix)
+        {
+            import std.algorithm : min;
+
+            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(info.path));
+
+            if (!prefix)
+                prefix = pref;
+
+            enforce (prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, prefix));
+
+            const len = min(info.path.length, prefix.length);
+            info.path = info.path[len .. $];
+
+            // skipping empty directory
+            if (!info.path.length && info.type == EntryType.directory)
+                readEntry();
+        }
 
         currentEntry = new ZipUnboxEntry!C(input, info);
     }
