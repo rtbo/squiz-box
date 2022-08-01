@@ -20,10 +20,10 @@ struct TarAlgo
         return TarBox!I(entries, chunkSize);
     }
 
-    auto unbox(I)(I input) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
     {
         auto dataInput = new ByteRangeCursor!I(input);
-        return TarUnbox(dataInput);
+        return TarUnbox(dataInput, removePrefix);
     }
 }
 
@@ -39,12 +39,12 @@ struct TarGzAlgo
         return TarBox!I(entries, chunkSize).deflateGz(chunkSize);
     }
 
-    auto unbox(I)(I input) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
     {
         auto ii = input.inflateGz();
         alias II = typeof(ii);
         auto dataInput = new ByteRangeCursor!II(ii);
-        return TarUnbox(dataInput);
+        return TarUnbox(dataInput, removePrefix);
     }
 }
 
@@ -62,12 +62,12 @@ version (HaveSquizBzip2)
             return TarBox!I(entries, chunkSize).compressBzip2(chunkSize);
         }
 
-        auto unbox(I)(I input) if (isByteRange!I)
+        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
         {
             auto ii = input.decompressBzip2();
             alias II = typeof(ii);
             auto dataInput = new ByteRangeCursor!II(ii);
-            return TarUnbox(dataInput);
+            return TarUnbox(dataInput, removePrefix);
         }
     }
 
@@ -86,12 +86,12 @@ version (HaveSquizLzma)
             return TarBox!I(entries, chunkSize).compressXz(chunkSize);
         }
 
-        auto unbox(I)(I input) if (isByteRange!I)
+        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
         {
             auto ii = input.decompressXz();
             alias II = typeof(ii);
             auto dataInput = new ByteRangeCursor!II(ii);
-            return TarUnbox(dataInput);
+            return TarUnbox(dataInput, removePrefix);
         }
     }
 
@@ -133,33 +133,33 @@ version (HaveSquizLzma)
 }
 
 /// Returns a range of entries from a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` formatted byte range
-auto unboxTar(I)(I input) if (isByteRange!I)
+auto unboxTar(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
 {
     auto dataInput = new ByteRangeCursor!I(input);
-    return TarUnbox(dataInput);
+    return TarUnbox(dataInput, removePrefix);
 }
 
 /// ditto
-auto unboxTarGz(I)(I input)
+auto unboxTarGz(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
 {
-    return input.inflateGz().unboxTar();
+    return input.inflateGz().unboxTar(removePrefix);
 }
 
 version (HaveSquizBzip2)
 {
     /// ditto
-    auto unboxTarBzip2(I)(I input)
+    auto unboxTarBzip2(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
     {
-        return input.decompressBzip2().unboxTar();
+        return input.decompressBzip2().unboxTar(removePrefix);
     }
 }
 
 version (HaveSquizLzma)
 {
     /// ditto
-    auto unboxTarXz(I)(I input)
+    auto unboxTarXz(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
     {
-        return input.decompressXz().unboxTar();
+        return input.decompressXz().unboxTar(removePrefix);
     }
 }
 
@@ -291,10 +291,13 @@ private struct TarUnbox
     private size_t _next;
     private ubyte[] _block;
     private UnboxEntry _entry;
+    private Flag!"removePrefix" _removePrefix;
+    private string _prefix;
 
-    this(Cursor input)
+    this(Cursor input, Flag!"removePrefix" removePrefix)
     {
         _input = input;
+        _removePrefix = removePrefix;
         _block = new ubyte[512];
 
         // file with zero bytes is a valid tar file
@@ -387,8 +390,29 @@ private struct TarUnbox
         version (Windows)
             info.path = info.path.replace('\\', '/');
 
-        _entry = new TarUnboxEntry(_input, info);
+        if (_removePrefix)
+        {
+            import std.algorithm : min;
 
+            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(info.path));
+
+            if (!_prefix)
+                _prefix = pref;
+
+            enforce (_prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, _prefix));
+
+            const len = min(info.path.length, _prefix.length);
+            info.path = info.path[len .. $];
+
+            // skipping empty directory
+            if (!info.path.length && info.type == EntryType.directory)
+            {
+                _next = next512(_input.pos + info.size);
+                readHeaderBlock();
+            }
+        }
+
+        _entry = new TarUnboxEntry(_input, info);
         _next = next512(_input.pos + info.size);
     }
 }

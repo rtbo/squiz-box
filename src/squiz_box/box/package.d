@@ -7,6 +7,7 @@ import squiz_box.util;
 import std.datetime.systime;
 import std.exception;
 import std.range;
+import std.typecons;
 
 public import squiz_box.box.tar;
 public import squiz_box.box.zip;
@@ -43,7 +44,7 @@ template isBoxAlgo(A)
     enum isBoxAlgo = is(typeof((A algo) {
                 BoxEntry[] boxEntries;
                 const(ubyte)[] bytes = algo.box(boxEntries).join();
-                UnboxEntry[] unboxEntries = algo.unbox(only(bytes)).array;
+                UnboxEntry[] unboxEntries = algo.unbox(only(bytes), No.removePrefix).array;
             }));
 }
 
@@ -61,12 +62,13 @@ interface BoxAlgo
     }
 
     /// Unbox the given byte range to a range of entries
-    UnboxEntryRange unbox(ByteRange bytes);
+    UnboxEntryRange unbox(ByteRange bytes, Flag!"removePrefix" removePrefix = No.removePrefix);
 
     /// ditto
-    UnboxEntryRange unbox(I)(I bytes) if (isByteRange!I && !is(I == ByteRange))
+    UnboxEntryRange unbox(I)(I bytes, Flag!"removePrefix" removePrefix = No.removePrefix)
+            if (isByteRange!I && !is(I == ByteRange))
     {
-        return unbox(inputRangeObject(bytes));
+        return unbox(inputRangeObject(bytes), removePrefix);
     }
 }
 
@@ -87,9 +89,9 @@ private class CBoxAlgo(A) : BoxAlgo if (isBoxAlgo!A)
     }
 
     /// Unbox the given byte range to a range of entries
-    UnboxEntryRange unbox(ByteRange bytes)
+    UnboxEntryRange unbox(ByteRange bytes, Flag!"removePrefix" removePrefix)
     {
-        return inputRangeObject(algo.unbox(bytes));
+        return inputRangeObject(algo.unbox(bytes, removePrefix));
     }
 }
 
@@ -158,10 +160,37 @@ ByteRange box(I, A)(I entries, A algo, size_t chunkSize = defaultChunkSize)
 
 /// Unbox bytes with the provided `algo`.
 /// Returns: A `UnboxEntryRange` of the entries contained in the box.
-UnboxEntryRange unbox(I, A)(I bytes, A algo)
+UnboxEntryRange unbox(I, A)(I bytes, A algo, Flag!"removePrefix" removePrefix = No.removePrefix)
         if (isByteRange!I && !is(I == ByteRange) && isBoxAlgo!A)
 {
-    return algo.unbox(inputRangeObject(bytes));
+    return algo.unbox(inputRangeObject(bytes), removePrefix);
+}
+
+package(squiz_box.box)
+{
+    string entryPrefix(string path, EntryType type)
+    {
+        import std.string : indexOf;
+
+        const slash = indexOf(path, '/');
+
+        if (slash >= 0 && slash + 1 == path.length && type != EntryType.directory)
+            throw new Exception("regular entry ending with /");
+
+        if (slash != -1)
+            return path[0 .. slash + 1];
+
+        if (type == EntryType.directory)
+            return path ~ "/";
+
+        return null;
+    }
+unittest
+{
+    assert(entryPrefix("prefix", EntryType.directory) == "prefix/");
+    assert(entryPrefix("prefix/", EntryType.directory) == "prefix/");
+    assert(entryPrefix("prefix/file", EntryType.regular) == "prefix/");
+}
 }
 
 /// Type of an archive entry
@@ -300,8 +329,7 @@ interface UnboxEntry : ArchiveEntry
     }
 
     /// Extract the entry to a file under the given base directory
-    /// `removePrefix`, if specified can remove a prefix from the entry path.
-    final void extractTo(string baseDirectory, string removePrefix = null)
+    final void extractTo(string baseDirectory)
     {
         import std.file : exists, isDir, mkdirRecurse, setAttributes, setTimes;
         import std.format : format;
@@ -319,20 +347,7 @@ interface UnboxEntry : ArchiveEntry
 
         string entryPath = this.path;
 
-        if (removePrefix)
-        {
-            enforce(
-                entryPath.startsWith(removePrefix),
-                format!`prefix "%s" do not match path "%s"`(removePrefix, entryPath)
-            );
-
-            entryPath = entryPath[removePrefix.length .. $];
-        }
-
         const extractPath = buildNormalizedPath(baseDirectory, entryPath);
-
-        if (removePrefix && extractPath.length == 0)
-            return;
 
         final switch (this.type)
         {

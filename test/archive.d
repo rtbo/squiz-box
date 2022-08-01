@@ -364,7 +364,7 @@ unittest
     testExtractedFiles(dm, Yes.mode666);
 }
 
-@("BoxAlgo.box")
+@("box")
 unittest
 {
     import std.algorithm : map;
@@ -385,7 +385,7 @@ unittest
 
 version (HaveSquizLzma)
 {
-    @("BoxAlgo.unbox")
+    @("unbox")
     unittest
     {
         import std.algorithm : each;
@@ -434,8 +434,8 @@ unittest
             rmdirRecurse(dir);
     }
 
-    unboxZip(File(file, "rb"))
-        .each!(e => e.extractTo(dir, "squiz-box-0.2.1/"));
+    unboxZip(File(file, "rb"), Yes.removePrefix)
+        .each!(e => e.extractTo(dir));
 
     assert(isFile(buildPath(dir, "meson.build")));
 }
