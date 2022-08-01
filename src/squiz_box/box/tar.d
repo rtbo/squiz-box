@@ -11,73 +11,91 @@ import std.range;
 import std.string;
 
 /// BoxAlgo for ".tar" files
-class TarAlgo : BoxAlgo
+struct TarAlgo
 {
-    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+    auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
+            if (isBoxEntryRange!I)
+    in (chunkSize >= 512 && chunkSize % 512 == 0)
     {
-        auto bytes = entries.boxTar(chunkSize);
-        return inputRangeObject(bytes);
+        return TarBox!I(entries, chunkSize);
     }
 
-    UnboxEntryRange unbox(ByteRange bytes)
+    auto unbox(I)(I input) if (isByteRange!I)
     {
-        auto entries = bytes.unboxTar();
-        return inputRangeObject(entries);
+        auto dataInput = new ByteRangeCursor!I(input);
+        return TarUnbox(dataInput);
     }
 }
+
+static assert(isBoxAlgo!TarAlgo);
 
 /// BoxAlgo for ".tar.gz" files
-class TarGzAlgo : BoxAlgo
+struct TarGzAlgo
 {
-    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+    auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
+            if (isBoxEntryRange!I)
+    in (chunkSize >= 512 && chunkSize % 512 == 0)
     {
-        auto bytes = entries.boxTarGz(chunkSize);
-        return inputRangeObject(bytes);
+        return TarBox!I(entries, chunkSize).deflateGz(chunkSize);
     }
 
-    UnboxEntryRange unbox(ByteRange bytes)
+    auto unbox(I)(I input) if (isByteRange!I)
     {
-        auto entries = bytes.unboxTarGz();
-        return inputRangeObject(entries);
+        auto ii = input.inflateGz();
+        alias II = typeof(ii);
+        auto dataInput = new ByteRangeCursor!II(ii);
+        return TarUnbox(dataInput);
     }
 }
+
+static assert(isBoxAlgo!TarGzAlgo);
 
 version (HaveSquizBzip2)
 {
     /// BoxAlgo for ".tar.bz2" files
-    class TarBzip2Algo : BoxAlgo
+    struct TarBzip2Algo
     {
-        ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+        auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
+                if (isBoxEntryRange!I)
+        in (chunkSize >= 512 && chunkSize % 512 == 0)
         {
-            auto bytes = entries.boxTarBzip2(chunkSize);
-            return inputRangeObject(bytes);
+            return TarBox!I(entries, chunkSize).compressBzip2(chunkSize);
         }
 
-        UnboxEntryRange unbox(ByteRange bytes)
+        auto unbox(I)(I input) if (isByteRange!I)
         {
-            auto entries = bytes.unboxTarBzip2();
-            return inputRangeObject(entries);
+            auto ii = input.decompressBzip2();
+            alias II = typeof(ii);
+            auto dataInput = new ByteRangeCursor!II(ii);
+            return TarUnbox(dataInput);
         }
     }
+
+    static assert(isBoxAlgo!TarBzip2Algo);
 }
 
 version (HaveSquizLzma)
 {
     /// BoxAlgo for ".tar.xz" files
-    class TarXzAlgo : BoxAlgo
+    struct TarXzAlgo
     {
-        ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+        auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
+                if (isBoxEntryRange!I)
+        in (chunkSize >= 512 && chunkSize % 512 == 0)
         {
-            auto bytes = entries.boxTarXz(chunkSize);
-            return inputRangeObject(bytes);
+            return TarBox!I(entries, chunkSize).compressXz(chunkSize);
         }
 
-        UnboxEntryRange unbox(ByteRange bytes)
+        auto unbox(I)(I input) if (isByteRange!I)
         {
-            auto entries = bytes.unboxTarXz();
-            return inputRangeObject(entries);
+            auto ii = input.decompressXz();
+            alias II = typeof(ii);
+            auto dataInput = new ByteRangeCursor!II(ii);
+            return TarUnbox(dataInput);
         }
     }
+
+    static assert(isBoxAlgo!TarXzAlgo);
 }
 
 /// Returns a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` archive as a byte range
@@ -111,6 +129,37 @@ version (HaveSquizLzma)
     auto boxTarXz(I)(I entries, size_t chunkSize = defaultChunkSize)
     {
         return boxTar(entries, chunkSize).compressXz(chunkSize);
+    }
+}
+
+/// Returns a range of entries from a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` formatted byte range
+auto unboxTar(I)(I input) if (isByteRange!I)
+{
+    auto dataInput = new ByteRangeCursor!I(input);
+    return TarUnbox(dataInput);
+}
+
+/// ditto
+auto unboxTarGz(I)(I input)
+{
+    return input.inflateGz().unboxTar();
+}
+
+version (HaveSquizBzip2)
+{
+    /// ditto
+    auto unboxTarBzip2(I)(I input)
+    {
+        return input.decompressBzip2().unboxTar();
+    }
+}
+
+version (HaveSquizLzma)
+{
+    /// ditto
+    auto unboxTarXz(I)(I input)
+    {
+        return input.decompressXz().unboxTar();
     }
 }
 
@@ -234,37 +283,6 @@ private struct TarBox(I)
 
 static assert(isByteRange!(TarBox!(BoxEntry[])));
 
-/// Returns a range of entries from a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` formatted byte range
-auto unboxTar(I)(I input) if (isByteRange!I)
-{
-    auto dataInput = new ByteRangeCursor!I(input);
-    return TarUnbox(dataInput);
-}
-
-/// ditto
-auto unboxTarGz(I)(I input)
-{
-    return input.inflateGz().unboxTar();
-}
-
-version (HaveSquizBzip2)
-{
-    /// ditto
-    auto unboxTarBzip2(I)(I input)
-    {
-        return input.decompressBzip2().unboxTar();
-    }
-}
-
-version (HaveSquizLzma)
-{
-    /// ditto
-    auto unboxTarXz(I)(I input)
-    {
-        return input.decompressXz().unboxTar();
-    }
-}
-
 private struct TarUnbox
 {
     private Cursor _input;
@@ -366,7 +384,7 @@ private struct TarUnbox
             info.groupId = parseOctalString(th.gid);
         }
 
-        version(Windows)
+        version (Windows)
             info.path = info.path.replace('\\', '/');
 
         _entry = new TarUnboxEntry(_input, info);

@@ -4,13 +4,25 @@ A D library that handles compression / decompression and archiving.
 
 In the Squiz-Box terminology, `squiz` refers to compression/decompression, while `box` refers to
 archiving. Squiz-Box API consists almost exclusively of range algorithms.
-`squiz` related algorithms map a range of bytes to another range of bytes where one is the compressed stream of the other. `box` and `unbox` related algorithms map a range of file entries to/from a range of bytes.
+`squiz` related algorithms map a range of bytes (range of byte chunks actually) to another range of bytes
+where one is the compressed stream of the other.
+`box` and `unbox` related algorithms map a range of file entries to/from a range of bytes.
 
 Squiz-Box provides both compile time known structures and dynamic types over all algorithms.
 ## Compression / decompression
 
 The range based design makes _squizing_ suitable for streaming and for
 transforming data from any kind of source to any kind of destination.
+
+Compression algorithms are represented by structs that share a common interface.
+Constructed objects from those structs carry parameters for compression / decompression
+and can instantiate a stream (class that derives `SquizStream`) that will carry the
+necessary state as well as input and output buffer.
+
+To process these algorithms and streams as D ranges, you use the `squiz` function.
+The `squiz` function works for both compression and decompression and there are many
+helpers built upon it (`deflate`, `inflate`, `compressXz`, ...).
+See code examples below for usage.
 
 ### Algorithms and formats
 
@@ -38,25 +50,16 @@ the compression ratio:
   - higher compression of compiled executable
   - available for different architectures (X86, ARM, ...)
 
-### API
-
-Algorithms are represented by structs that share a common interface.
-Constructed objects from those structs carry parameters for compression / decompression
-and can instantiate a stream (class that derives `SquizStream`) that will carry the
-necessary state as well as input and output buffer.
-
-To process these algorithms and streams as D ranges, you use the `squiz` function.
-The `squiz` function works for both compression and decompression and there are many
-helpers built upon it (`deflate`, `inflate`, `compressXz`, ...).
-See code examples below for usage.
-
 ## Archiving
 
-Whenever possible, archving and de-archiving are implemented as the
-transformation of a range of file entries to a range of bytes.
-It is never required to have the full archive in memory at the same time,
-so it is possible to create or extract archives of dozens of giga-bytes with
-minimal memory foot print.
+Archiving is similar to the compression/decompression API: algorithms are described by structs
+that share a common interface and that use pass to the `box` and `unbox` function to process D ranges.
+
+The `box` function generates a range of byte chunks from a range of entries, and the opposite
+is done by the `unbox` function.
+`box` consumes a range of `BoxEntry`, which is a class that can be derived (only `FileBoxEntry` is provided so far).
+`unbox` returns a range of `UnboxEntry`, which has an `extractTo` method.
+See hereunder for code examples.
 
 The following formats are supported:
 - Tar (including `.tar.gz`, `.tar.bz2`, `.tar.xz`)
@@ -64,7 +67,13 @@ The following formats are supported:
 
 There is also WIP for 7z.
 
-Archive update is not supported at this stage.
+Squiz-Box will not allocate more memory than strictly necessary. A consequence is that the ranges of `UnboxEntry` must be
+processed in the order they are in the archive.
+If one needs to store the entries in memory, some algorithms take a `File` or `const(ubyte)[]` parameter to describe the whole archive.
+Each `UnboxEntry` will reference the data source and seek as necessary. (e.g. `unboxZip(File)`)
+
+Archive update is not supported at this stage. It will be easily done in a single range expression once an implementation
+of `BoxEntry` that reads from `UnboxEntry` will be written (PR welcome).
 
 ## Code examples
 
@@ -114,6 +123,9 @@ dirEntries(root, SpanMode.breadth, false)
     .map!(e => fileEntry(e.name, root, null))    // range of FileBoxEntry
     .boxZip()                                    // range of bytes
     .writeBinaryFile("some-dir.zip");
+
+// boxZip is identical to box(ZipAlgo.init)
+
 ```
 
 Create a `.tar.xz` file from a directory (with little bit more control):
@@ -140,6 +152,8 @@ dirEntries(root, SpanMode.breadth, false)
     .boxTar()
     .compressXz()
     .writeBinaryFile("squiz-box-12.5.tar.xz");
+
+/// boxTarXz() is equivalent to boxTar().compressXz()
 ```
 
 ### Extract an archive into a directory
@@ -153,8 +167,7 @@ const extractionSite = "some-dir";
 mkdir(extractionSite);
 
 readBinaryFile(archive)
-    .inflateGz()
-    .unboxTar()                               // range of UnboxEntry
+    .unboxTarGz()                         // range of UnboxEntry
     .each!(e => e.extractTo(extractionSite));
 ```
 
@@ -189,10 +202,10 @@ const filename = "squiz-box-12.5.tar.xz";
 
 /// BoxAlgo is a D interface
 /// It can be instantiated from a filename with archive extension
-/// or directly with the implementing classes (ZipBox, TarXzBox, ...)
-BoxAlgo algo = BoxAlgo.fromFilename(filename);
+/// or directly with the implementing struct (ZipAlgo, TarXzAlgo, ...)
+BoxAlgo algo = boxAlgo(filename);
 
-/// the rest is (almost) the same as before
+/// the rest is the same as before
 
 const root = squizBoxDir;
 
@@ -202,14 +215,12 @@ const prefix = "squiz-box-12.5/";
 
 const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
 
-// no need to collect entries in an array
-auto entries = dirEntries(root, SpanMode.breadth, false)
+dirEntries(root, SpanMode.breadth, false)
     .filter!(e => !e.isDir)
     .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
-    .map!(e => fileEntry(e.name, root, prefix));
-
-// algo.box is a template function that can receive any range of BoxEntry
-algo.box(entries).writeBinaryFile(filename);
+    .map!(e => fileEntry(e.name, root, prefix))
+    .box(algo)
+    .writeBinaryFile(filename);
 ```
 
 ### Full control over the streaming process

@@ -17,6 +17,36 @@ alias BoxEntryRange = InputRange!BoxEntry;
 /// A dynamic range of UnboxEntry
 alias UnboxEntryRange = InputRange!UnboxEntry;
 
+/// Static check that a type is an InputRange of BoxEntry
+template isBoxEntryRange(I)
+{
+    import std.range : ElementType, isInputRange;
+
+    enum isBoxEntryRange = isInputRange!I && is(ElementType!I : BoxEntry);
+}
+
+static assert(isBoxEntryRange!(BoxEntry[]));
+
+/// Static check that a type is an InputRange of UnboxEntry
+template isUnboxEntryRange(I)
+{
+    import std.range : ElementType, isInputRange;
+
+    enum isUnboxEntryRange = isInputRange!I && is(ElementType!I : UnboxEntry);
+}
+
+static assert(isUnboxEntryRange!(UnboxEntry[]));
+
+/// Check whether a type is a proper box/unbox algorithm.
+template isBoxAlgo(A)
+{
+    enum isBoxAlgo = is(typeof((A algo) {
+                BoxEntry[] boxEntries;
+                const(ubyte)[] bytes = algo.box(boxEntries).join();
+                UnboxEntry[] unboxEntries = algo.unbox(only(bytes)).array;
+            }));
+}
+
 /// A dynamic interface to boxing/unboxing algorithm
 interface BoxAlgo
 {
@@ -38,68 +68,101 @@ interface BoxAlgo
     {
         return unbox(inputRangeObject(bytes));
     }
+}
 
-    static BoxAlgo forFilename(string filename)
+static assert(isBoxAlgo!BoxAlgo);
+
+private class CBoxAlgo(A) : BoxAlgo if (isBoxAlgo!A)
+{
+    private A algo;
+
+    this(A algo)
     {
-        import std.string : endsWith, toLower;
-        import std.path : baseName;
+        this.algo = algo;
+    }
 
-        const fn = baseName(filename).toLower();
+    ByteRange box(BoxEntryRange entries, size_t chunkSize)
+    {
+        return inputRangeObject(algo.box(entries, chunkSize));
+    }
 
-        if (fn.endsWith(".tar.xz"))
-        {
-            version (HaveSquizLzma)
-            {
-                return new TarXzAlgo();
-            }
-            else
-            {
-                assert(false, "Squiz-Box built without LZMA support");
-            }
-        }
-        else if (fn.endsWith(".tar.gz"))
-        {
-            return new TarGzAlgo();
-        }
-        else if (fn.endsWith(".zip"))
-        {
-            return new ZipAlgo();
-        }
-        else if (fn.endsWith(".tar.bz2"))
-        {
-            version (HaveSquizBzip2)
-            {
-                return new TarBzip2Algo();
-            }
-            else
-            {
-                assert(false, "Squiz-Box built without Bzip2 support");
-            }
-        }
-
-        throw new Exception(fn ~ " has unsupported archive extension");
+    /// Unbox the given byte range to a range of entries
+    UnboxEntryRange unbox(ByteRange bytes)
+    {
+        return inputRangeObject(algo.unbox(bytes));
     }
 }
 
-/// Static check that a type is an InputRange of BoxEntry
-template isBoxEntryRange(I)
+/// Build a BoxAlgo interface from a compile-time known box algo structure.
+BoxAlgo boxAlgo(A)(A algo) if (isBoxAlgo!A)
 {
-    import std.range : ElementType, isInputRange;
-
-    enum isBoxEntryRange = isInputRange!I && is(ElementType!I : BoxEntry);
+    return new CBoxAlgo!A(algo);
 }
 
-static assert(isBoxEntryRange!(BoxEntry[]));
-
-/// Static check that a type is an InputRange of UnboxEntry
-template isUnboxEntryRange(I)
+/// Build a BoxAlgo interface from the filename of the archive.
+/// Only the externsion of the filename is used.
+BoxAlgo boxAlgo(string archiveFilename)
 {
-    import std.range : ElementType, isInputRange;
+    import std.string : endsWith, toLower;
+    import std.path : baseName;
 
-    enum isUnboxEntryRange = isInputRange!I && is(ElementType!I : UnboxEntry);
+    const fn = baseName(archiveFilename).toLower();
+
+    if (fn.endsWith(".tar.xz"))
+    {
+        version (HaveSquizLzma)
+        {
+            return boxAlgo(TarXzAlgo.init);
+        }
+        else
+        {
+            assert(false, "Squiz-Box built without LZMA support");
+        }
+    }
+    else if (fn.endsWith(".tar.gz"))
+    {
+        return boxAlgo(TarGzAlgo.init);
+    }
+    else if (fn.endsWith(".zip"))
+    {
+        return boxAlgo(ZipAlgo.init);
+    }
+    else if (fn.endsWith(".tar.bz2"))
+    {
+        version (HaveSquizBzip2)
+        {
+            return boxAlgo(TarBzip2Algo.init);
+        }
+        else
+        {
+            assert(false, "Squiz-Box built without Bzip2 support");
+        }
+    }
+
+    throw new Exception(fn ~ " has unsupported archive extension");
 }
 
-static assert(isUnboxEntryRange!(UnboxEntry[]));
+/// Box entries with the provided `algo`.
+/// Params:
+///   entries = a `InputRange` of `BoxEntry`
+///   algo = the boxing algorithm
+///   defaultChunkSize = chunk size of the returned byte range
+///   removePrefix = whether the initial prefix should be removed from the entry path.
+///
+/// Returns: A `ByteRange` of the boxed archive.
+ByteRange box(I, A)(I entries, A algo, size_t chunkSize = defaultChunkSize)
+        if (isBoxEntryRange!I && !is(I == BoxEntryRange) && isBoxAlgo!A)
+{
+    return algo.box(inputRangeObject(entries), chunkSize);
+}
+
+/// Unbox bytes with the provided `algo`.
+/// Returns: A `UnboxEntryRange` of the entries contained in the box.
+UnboxEntryRange unbox(I, A)(I bytes, A algo)
+        if (isByteRange!I && !is(I == ByteRange) && isBoxAlgo!A)
+{
+    return algo.unbox(inputRangeObject(bytes));
+}
 
 /// Type of an archive entry
 enum EntryType
