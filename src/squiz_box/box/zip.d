@@ -12,25 +12,45 @@ import std.stdio : File;
 import std.string;
 
 /// BoxAlgo for ".zip" files
-class ZipAlgo : BoxAlgo
+struct ZipAlgo
 {
-    ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize)
+    auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
+            if (isBoxEntryRange!I)
     {
-        auto bytes = boxZip(entries, chunkSize);
-        return inputRangeObject(bytes);
+        return ZipBox!I(entries, chunkSize);
     }
 
-    UnboxEntryRange unbox(ByteRange bytes)
+    auto unbox(I)(I input) if (isByteRange!I)
     {
-        auto entries = unboxZip(bytes);
-        return inputRangeObject(entries);
+        auto stream = new ByteRangeCursor!I(input);
+        return ZipUnbox!Cursor(stream);
     }
 }
+
+static assert(isBoxAlgo!ZipAlgo);
 
 auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isBoxEntryRange!I)
 {
     return ZipBox!I(entries, chunkSize);
+}
+
+auto unboxZip(I)(I input) if (isByteRange!I)
+{
+    auto stream = new ByteRangeCursor!I(input);
+    return ZipUnbox!Cursor(stream);
+}
+
+auto unboxZip(File input)
+{
+    auto stream = new FileCursor(input);
+    return ZipUnbox!SearchableCursor(stream);
+}
+
+auto unboxZip(ubyte[] zipData)
+{
+    auto stream = new ArrayCursor(zipData);
+    return ZipUnbox!SearchableCursor(stream);
 }
 
 private struct ZipBox(I)
@@ -402,24 +422,6 @@ private class Deflater
                 break;
         }
     }
-}
-
-auto unboxZip(I)(I input) if (isByteRange!I)
-{
-    auto stream = new ByteRangeCursor!I(input);
-    return ZipUnbox!Cursor(stream);
-}
-
-auto unboxZip(File input)
-{
-    auto stream = new FileCursor(input);
-    return ZipUnbox!SearchableCursor(stream);
-}
-
-auto unboxZip(ubyte[] zipData)
-{
-    auto stream = new ArrayCursor(zipData);
-    return ZipUnbox!SearchableCursor(stream);
 }
 
 private struct ZipUnbox(C) if (is(C : Cursor))

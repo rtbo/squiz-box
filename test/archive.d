@@ -373,9 +373,11 @@ unittest
     const dm = DeleteMe("dest", ".zip");
     auto base = dataGenPath();
 
-    auto algo = BoxAlgo.forFilename(dm.path);
+    auto algo = boxAlgo(dm.path);
 
-    algo.box(filesForArchive().map!(p => fileEntry(p, base)))
+    filesForArchive()
+        .map!(p => fileEntry(p, base))
+        .box(algo)
         .writeBinaryFile(dm.path);
 
     testZipArchiveContent(dm.path);
@@ -395,8 +397,11 @@ version (HaveSquizLzma)
 
         mkdir(dm.path);
 
-        auto algo = BoxAlgo.forFilename(archive);
-        auto entries = algo.unbox(readBinaryFile(archive));
+        auto algo = boxAlgo(archive);
+
+        auto entries = readBinaryFile(archive)
+            .unbox(algo);
+
         entries.each!(e => e.extractTo(dm.path));
 
         testExtractedFiles(dm, Yes.mode666);
