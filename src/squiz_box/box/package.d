@@ -185,12 +185,13 @@ package(squiz_box.box)
 
         return null;
     }
-unittest
-{
-    assert(entryPrefix("prefix", EntryType.directory) == "prefix/");
-    assert(entryPrefix("prefix/", EntryType.directory) == "prefix/");
-    assert(entryPrefix("prefix/file", EntryType.regular) == "prefix/");
-}
+
+    unittest
+    {
+        assert(entryPrefix("prefix", EntryType.directory) == "prefix/");
+        assert(entryPrefix("prefix/", EntryType.directory) == "prefix/");
+        assert(entryPrefix("prefix/file", EntryType.regular) == "prefix/");
+    }
 }
 
 /// Type of an archive entry
