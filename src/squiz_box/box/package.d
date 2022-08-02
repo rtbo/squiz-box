@@ -185,12 +185,13 @@ package(squiz_box.box)
 
         return null;
     }
-unittest
-{
-    assert(entryPrefix("prefix", EntryType.directory) == "prefix/");
-    assert(entryPrefix("prefix/", EntryType.directory) == "prefix/");
-    assert(entryPrefix("prefix/file", EntryType.regular) == "prefix/");
-}
+
+    unittest
+    {
+        assert(entryPrefix("prefix", EntryType.directory) == "prefix/");
+        assert(entryPrefix("prefix/", EntryType.directory) == "prefix/");
+        assert(entryPrefix("prefix/file", EntryType.regular) == "prefix/");
+    }
 }
 
 /// Type of an archive entry
@@ -301,6 +302,22 @@ interface BoxEntry : ArchiveEntry
     }
 }
 
+version (Posix)
+{
+    version (CRuntime_Musl)
+    {
+        // C runtime MUSL (Alpine Linux) do not declare lchown
+        import core.sys.posix.sys.types : gid_t, uid_t;
+
+        private extern (C) nothrow @nogc @system int lchown(const scope char*, uid_t, gid_t);
+    }
+    else
+    {
+        import core.sys.posix.unistd : lchown;
+
+    }
+}
+
 /// Interface of ArchiveEntry used for archive extraction
 interface UnboxEntry : ArchiveEntry
 {
@@ -358,12 +375,14 @@ interface UnboxEntry : ArchiveEntry
             mkdirRecurse(dirName(extractPath));
             version (Posix)
             {
-                import core.sys.posix.unistd : lchown;
                 import std.file : symlink;
                 import std.string : toStringz;
 
                 symlink(this.linkname, extractPath);
-                lchown(toStringz(extractPath), this.ownerId, this.groupId);
+                if (lchown(toStringz(extractPath), this.ownerId, this.groupId) == -1)
+                {
+                    // warn? throw? ignore?
+                }
             }
             else version (Windows)
             {
