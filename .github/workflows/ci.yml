@@ -43,7 +43,7 @@ jobs:
         with:
           action: test
           directory: build
-          setup-options: --buildtype=${{ matrix.bt }} -Ddefault_library=static
+          setup-options: --buildtype=${{ matrix.bt }} -Denable_test=true
           meson-version: ${{ matrix.meson }}
           options: --verbose
 

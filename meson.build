@@ -58,19 +58,21 @@ squiz_dep = declare_dependency(
     d_module_versions: squiz_ver,
 )
 
-squiz_test_src = squiz_src + files([
-    'test/archive.d',
-    'test/compress.d',
-    'test/main.d',
-    'test/util.d',
-])
+if get_option('enable_test')
+    squiz_test_src = squiz_src + files([
+        'test/archive.d',
+        'test/compress.d',
+        'test/main.d',
+        'test/util.d',
+    ])
 
-squiz_test_exe = executable('squiz-test', squiz_test_src,
-    d_unittest: true,
-    install: false,
-    include_directories: squiz_inc,
-    dependencies: squiz_deps,
-    d_module_versions: squiz_ver,
-)
+    squiz_test_exe = executable('squiz-test', squiz_test_src,
+        d_unittest: true,
+        install: false,
+        include_directories: squiz_inc,
+        dependencies: squiz_deps,
+        d_module_versions: squiz_ver,
+    )
 
-test('unit tests', squiz_test_exe)
+    test('unit tests', squiz_test_exe)
+endif

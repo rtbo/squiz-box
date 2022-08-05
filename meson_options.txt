@@ -18,3 +18,8 @@ option('minimal',
     value: false,
     description: 'Disable features requiring external libraries',
 )
+option('enable_test',
+    type: 'boolean',
+    value: false,
+    description: 'Enable the automated tests',
+)
