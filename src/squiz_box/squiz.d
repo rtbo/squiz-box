@@ -715,7 +715,7 @@ struct GzHeader
 }
 
 /// Type of delegate to use as callback for Inflate.gzHeaderDg
-alias GzHeaderDg = void delegate(GzHeader header);
+alias GzHeaderDg = void delegate(GzHeader header) @safe;
 
 /// Helper to set GzHeader.text
 /// Will check if the data are all ascii characters
@@ -993,7 +993,7 @@ struct Inflate
         return stream;
     }
 
-    package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ )
+    package Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" /+ lastChunk +/ ) @safe
     {
         const res = (() @trusted => squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH))();
         //
@@ -1466,7 +1466,7 @@ version (HaveSquizLzma)
         }
 
         private lzma_filter[] buildFilterChain(LzmaFormat format, LzmaFilter[] filters,
-            uint preset, uint deltaDist) @safe
+        uint preset, uint deltaDist) @safe
         {
             lzma_filter[] res;
             foreach (f; filters)
@@ -1982,7 +1982,7 @@ version (HaveSquizLzma)
             .join();
 
         const output = only(withDelta) // using compression parameters for decompression
-        .squiz(DecompressLzma(comp))
+            .squiz(DecompressLzma(comp))
             .join();
 
         assert(output == input);
