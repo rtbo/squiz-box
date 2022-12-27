@@ -5,6 +5,7 @@ import squiz_box;
 import std.digest;
 import std.digest.sha;
 import std.file;
+import std.random;
 import std.path;
 import std.string;
 
@@ -286,6 +287,99 @@ unittest
 
     assert(getSize(dm.path) == len);
 }
+
+/// Generate potentially large but repetitive data constituted of the same phrase repeated
+/// over and over until byteSize is written out.
+auto generateRandomData(size_t byteSize, uint seed = unpredictableSeed(), size_t chunkSize = 8192)
+{
+    auto eng = Random(seed);
+    return RandomDataGen(byteSize, eng, chunkSize);
+}
+
+private struct RandomDataGen
+{
+    size_t remaining;
+    Random eng;
+    ubyte[] buffer;
+    ubyte[] chunk;
+
+    this(size_t byteSize, Random eng, size_t chunkSize)
+    {
+        remaining = byteSize;
+        this.eng = eng;
+        buffer = new ubyte[chunkSize];
+        prime();
+    }
+
+    @property bool empty()
+    {
+        return chunk.length == 0;
+    }
+
+    @property ByteChunk front()
+    {
+        return chunk;
+    }
+
+    private void prime()
+    {
+        import std.algorithm : min;
+
+        while (chunk.length < buffer.length && remaining > 0)
+        {
+            const uint irnd = eng.front();
+            eng.popFront();
+            const ubyte[4] rnd = (cast(const(ubyte)*)&irnd)[0 .. 4];
+            const bufStart = chunk.length;
+            const len = min(4, buffer.length - bufStart, remaining);
+            buffer[bufStart .. bufStart + len] = rnd[0 .. len];
+            chunk = buffer[0 .. bufStart + len];
+            remaining -= len;
+        }
+    }
+
+    void popFront()
+    {
+        chunk = null;
+        prime();
+    }
+}
+
+static assert(isByteRange!RandomDataGen);
+
+@("bench CRC32")
+unittest
+{
+    import squiz_box.c.zlib;
+    import std.digest.crc : crc32Of;
+    import std.datetime.stopwatch : benchmark;
+    import std.stdio : writefln;
+
+    const sz = 1024*1024;
+    const ubyte[] data = generateRandomData(sz).join();
+
+    const uint zlibIRes = squiz_box.c.zlib.crc32(0, &data[0], sz);
+    const ubyte[4] zlibResult = (cast(const(ubyte)*)&zlibIRes)[0 .. 4];
+    const ubyte[4] phobosResult = crc32Of(data);
+
+    assert(cast(ubyte[4])zlibResult == phobosResult);
+
+    void zlibRun()
+    {
+        cast(void)squiz_box.c.zlib.crc32(0, &data[0], sz);
+    }
+
+    void phobosRun()
+    {
+        cast(void)crc32Of(data);
+    }
+
+    auto res = benchmark!(zlibRun, phobosRun)(100);
+
+    writefln!"zlib   crc32 took %s µs"(res[0].total!"usecs");
+    writefln!"phobos crc32 took %s µs"(res[1].total!"usecs");
+}
+
 
 /// Generate a unique name for temporary path (either dir or file)
 /// Params:
