@@ -422,6 +422,140 @@ struct CursorByteRange(C) if (is(C : Cursor))
     }
 }
 
+interface WriteCursor
+{
+    void put(ubyte val);
+
+    void write(const(ubyte)[] arr);
+}
+
+interface SearchableWriteCursor : WriteCursor
+{
+    ulong tell();
+    void seek(ulong pos);
+}
+
+class ArrayWriteCursor : SearchableWriteCursor
+{
+    ubyte[] _data;
+    size_t _writePos;
+
+    this(ubyte[] data)
+    {
+        _data = data;
+        _writePos = cast(size_t)data.length;
+    }
+
+    this(size_t cap=0)
+    {
+        if (cap != 0)
+            reserve(_data, cap);
+    }
+
+    @property ubyte[] data()
+    {
+        return _data;
+    }
+
+    @property size_t capacity()
+    {
+        return _data.capacity;
+    }
+
+    void reserveCapacity(size_t cap)
+    {
+        reserve(_data, cap);
+    }
+
+    ulong tell()
+    {
+        return _writePos;
+    }
+
+    void seek(ulong pos)
+    {
+        assert(pos < size_t.max);
+
+        _writePos = cast(size_t)pos;
+        if (_writePos > _data.length)
+            _data.length = _writePos;
+    }
+
+    void put(ubyte val)
+    {
+        if (_writePos == _data.length)
+            _data ~= val;
+        else
+            _data[_writePos] = val;
+        _writePos++;
+    }
+
+    void write(const(ubyte)[] arr)
+    {
+        if (_writePos == _data.length)
+        {
+            _writePos += arr.length;
+            _data ~= arr;
+            return;
+        }
+
+        const overwrite = _data.length - _writePos;
+        _data[_writePos .. _writePos + overwrite] = arr[0 .. overwrite];
+        if (overwrite < arr.length)
+            _data ~= arr[overwrite .. $];
+        _writePos += arr.length;
+    }
+}
+
+class FileWriteCursor : WriteCursor
+{
+    import std.stdio : File;
+
+    File _file;
+
+    this(File file)
+    {
+        _file = file;
+    }
+
+    this(string filename)
+    {
+        _file = File(filename, "wb");
+    }
+
+    void close()
+    {
+        _file.close();
+        _file = File.init;
+    }
+
+    @property File file()
+    {
+        return _file;
+    }
+
+    ulong tell()
+    {
+        return _file.tell;
+    }
+
+    void seek(ulong pos)
+    {
+        _file.seek(pos);
+    }
+
+    void put(ubyte val)
+    {
+        auto buf = (&val)[0 .. 1];
+        _file.rawWrite(buf);
+    }
+
+    void write(const(ubyte)[] arr)
+    {
+        _file.rawWrite(arr);
+    }
+}
+
 // Common algorithm for all compression/decompression functions.
 // I is a byte input range
 // P is a stream processor
