@@ -61,7 +61,7 @@ interface Cursor
     ubyte[] read(ubyte[] buffer);
 
     /// Read T.sizeof data and returns it as a T.
-    /// Similar to get!T but the value is passed as pointer to be filled in.
+    /// Similar to getValue!T but the value is passed as pointer to be filled in.
     /// Prefer this form for greater values (e.g. dozens of bytes)
     void readValue(T)(T* val) if (!isDynamicArray!T)
     {
