@@ -10,6 +10,7 @@ import std.range;
 import std.typecons;
 
 public import squiz_box.box.tar;
+public import squiz_box.box.seven_z;
 public import squiz_box.box.zip;
 
 /// A dynamic range of BoxEntry
