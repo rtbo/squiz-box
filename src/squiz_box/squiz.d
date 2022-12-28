@@ -998,7 +998,7 @@ struct Inflate
         const res = (() @trusted => squiz_box.c.zlib.inflate(&stream.strm, Z_NO_FLUSH))();
         //
         if (res == Z_DATA_ERROR)
-            throw new DataException("Improper data given to deflate");
+            throw new DataException("Improper data given to inflate");
 
         enforce(
             res == Z_OK || res == Z_STREAM_END,
