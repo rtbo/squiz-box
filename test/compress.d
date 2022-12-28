@@ -4,6 +4,8 @@ import test.archive;
 import test.util;
 import squiz_box;
 
+import std.range;
+import std.string;
 import std.typecons;
 
 @("Compress GZ tar")
@@ -320,4 +322,21 @@ private void testCompressData(alias fun)(size_t len, string filename, string alg
 
     // writefln("%s of %sMb of %s data took %s ms", algo, len / (1000*1000), datatype, time.total!"msecs");
     // writefln("    compressed size = %.1fKb (compression ratio = %s)", compressedSz / 1000.0, ratio);
+}
+
+@("test compound squiz")
+unittest
+{
+    const phrase = "Some phrase to be repeated over and over.\n".representation;
+    const data = generateRepetitiveData(1024 * 1024, phrase).join();
+
+    auto algos = [
+        squizAlgo(Deflate.init), squizAlgo(Inflate.init)
+    ];
+
+    auto identity = squizCompoundAlgo(algos);
+
+    auto dataOut = only(data).squiz(identity).join();
+
+    assert(data == dataOut);
 }
