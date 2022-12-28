@@ -627,7 +627,11 @@ version (HaveSquizLzma)
             0x00, 0x00
         ];
 
-        auto algo = DecompressLzma(LzmaFormat.rawLegacy);
+        DecompressLzma algo;
+        algo.format = LzmaFormat.raw;
+        algo.rawFilters = [
+            LzmaFilter(Lzma1PresetFilter(6))
+        ];
 
         const dataOut = only(dataIn)
             .squizMaxOut(algo, expectedDataOut.length)
@@ -1629,14 +1633,511 @@ version (HaveSquizBzip2)
 
 version (HaveSquizLzma)
 {
+    import std.sumtype;
+
+    /// Filters to use with for the LZMA compression.
+    ///
+    /// Up to 4 filters can be used from this list,
+    /// the last one being generally the compression filter.
+    ///
+    /// The delta and BCJ filters transform the input to increase
+    /// redundancy of the data supplied to the LZMA compression.
+    ///
+    /// Compression with preset and advanced filters are essentially the same thing.
+    /// Preset filters are used to setup an advanced filter in an easier way.
+    alias LzmaFilter = SumType!(
+        LzmaDeltaFilter,
+        LzmaBcjFilter,
+        Lzma1PresetFilter,
+        Lzma2PresetFilter,
+        Lzma1AdvancedFilter,
+        Lzma2AdvancedFilter,
+        LzmaRawFilter,
+    );
+
+    /// Delta filter, which store differences between bytes
+    /// to produce more repetitive data in some circumstances.
+    struct LzmaDeltaFilter
+    {
+        /// The distance between two successive byte pattern for the delta filter.
+        /// Must be between 1 and 256.
+        /// e.g.:
+        ///  - should be 3 for raw RGB data
+        ///  - should be 4 for raw 16bit PCM stereo data
+        uint dist;
+    }
+
+    /// BCJ (Branch/Call/Jump) filters aim optimize machine code
+    /// compression by converting relative branches, calls and jumps
+    /// to absolute addresses. This increases redundancy and can be
+    /// exploited by the LZMA compression.
+    ///
+    /// BCJ filters are available for a set of CPU architectures.
+    /// Use one (or two) of them when compressing compiled binaries.
+    struct LzmaBcjFilter
+    {
+        enum Arch
+        {
+            x86 = 0x04,
+            powerPc = 0x05,
+            ia64 = 0x06,
+            arm = 0x07,
+            armThumb = 0x08,
+            sparc = 0x09,
+        }
+
+        Arch arch;
+        uint startOffset;
+    }
+
+    mixin template LzmaPresetOptions()
+    {
+        /// The compression preset between 0 (fast) to 9 (higher compression).
+        /// The default is 6.
+        uint preset = 6;
+
+        /// Makes the encoding significantly slower for marginal compression
+        /// improvement. Only useful if you don't mind about CPU time at all.
+        Flag!"extreme" extreme;
+    }
+
+    /// Legacy LZMA compression (aka. LZMA1).
+    /// Setup is made easy with a preset between 0 and 9.
+    struct Lzma1PresetFilter
+    {
+        mixin LzmaPresetOptions!();
+    }
+
+    /// LZMA compression (aka. LZMA2).
+    /// Setup is made easy with a preset between 0 and 9.
+    struct Lzma2PresetFilter
+    {
+        mixin LzmaPresetOptions!();
+    }
+
+    /+
+     + Advanced filter parameters
+     +/
+
+    /// Match finder has major effect on both speed and compression ratio.
+    /// Usually hash chains are faster than binary trees.
+    ///
+    /// If you will use LZMA_SYNC_FLUSH often, the hash chains may be a better
+    /// choice, because binary trees get much higher compression ratio penalty
+    /// with LZMA_SYNC_FLUSH.
+    ///
+    /// The memory usage formulas are only rough estimates, which are closest to
+    /// reality when dict_size is a power of two. The formulas are  more complex
+    /// in reality, and can also change a little between liblzma versions. Use
+    /// lzma_raw_encoder_memusage() to get more accurate estimate of memory usage.
+    enum LzmaMatchFinder
+    {
+        /// Hash Chain with 2- and 3-byte hashing
+        ///
+        /// Minimum nice_len: 3
+        ///
+        /// Memory usage:
+        ///  - dict_size <= 16 MiB: dict_size * 7.5
+        ///  - dict_size > 16 MiB: dict_size * 5.5 + 64 MiB
+        hc3 = 0x03,
+        /// Hash Chain with 2-, 3-, and 4-byte hashing
+        /// Minimum nice_len: 4
+        /// Memory usage:
+        ///  - dict_size <= 32 MiB: dict_size * 7.5
+        ///  - dict_size > 32 MiB: dict_size * 6.5
+        hc4 = 0x04,
+        /// Binary Tree with 2-byte hashing
+        /// Minimum nice_len: 2
+        /// Memory usage: dict_size * 9.5
+        bt2 = 0x12,
+        /// Binary Tree with 2- and 3-byte hashing
+        /// Minimum nice_len: 3
+        /// Memory usage:
+        ///  - dict_size <= 16 MiB: dict_size * 11.5
+        ///  - dict_size > 16 MiB: dict_size * 9.5 + 64 MiB
+        bt3 = 0x13,
+        /// Binary Tree with 2-, 3-, and 4-byte hashing
+        /// Minimum nice_len: 4
+        /// Memory usage:
+        ///  - dict_size <= 32 MiB: dict_size * 11.5
+        ///  - dict_size > 32 MiB: dict_size * 10.5
+        bt4 = 0x14,
+    }
+
+    @property bool isMatchFinderSupported(LzmaMatchFinder mf)
+    {
+        return lzma_mf_is_supported(cast(lzma_match_finder) mf);
+    }
+
+    /// Compression mode
+    ///
+    /// This will select the function used to analyze the data
+    /// produced by the match finder
+    enum LzmaMode
+    {
+        /// Fast compression
+        ///
+        /// Fast mode is usually at its best when combined with
+        /// a hash chain match finder.
+        fast = 1,
+        /// Normal compression
+        ///
+        /// This is usually notably slower than fast mode. Use this
+        /// together with binary tree match finders to expose the
+        /// full potential of the LZMA1 or LZMA2 encoder.
+        normal = 2,
+    }
+
+    @property bool isModeSupported(LzmaMode mode)
+    {
+        return lzma_mode_is_supported(cast(lzma_mode) mode);
+    }
+
+    mixin template LzmaAdvancedOptions()
+    {
+        /// Dictionary size in bytes
+        ///
+        /// Dictionary size indicates how many bytes of the recently processed
+        /// uncompressed data is kept in memory. One method to reduce size of
+        /// the uncompressed data is to store distance-length pairs, which
+        /// indicate what data to repeat from the dictionary buffer. Thus,
+        /// the bigger the dictionary, the better the compression ratio
+        /// usually is.
+        ///
+        /// Maximum size of the dictionary depends on multiple things:
+        ///  - Memory usage limit
+        ///  - Available address space (not a problem on 64-bit systems)
+        ///  - Selected match finder (encoder only)
+        ///
+        /// Currently the maximum dictionary size for encoding is 1.5 GiB
+        /// (i.e. (UINT32_C(1) << 30) + (UINT32_C(1) << 29)) even on 64-bit
+        /// systems for certain match finder implementation reasons. In the
+        /// future, there may be match finders that support bigger
+        /// dictionaries.
+        ///
+        /// Decoder already supports dictionaries up to 4 GiB - 1 B (i.e.
+        /// UINT32_MAX), so increasing the maximum dictionary size of the
+        /// encoder won't cause problems for old decoders.
+        ///
+        /// Because extremely small dictionaries sizes would have unneeded
+        /// overhead in the decoder, the minimum dictionary size is 4096 bytes.
+        ///
+        /// Note:        When decoding, too big dictionary does no other harm
+        ///              than wasting memory.
+        uint dictSize;
+
+        /// An initial dictionary
+        ///
+        /// It is possible to initialize the LZ77 history window using
+        /// a preset dictionary. It is useful when compressing many
+        /// similar, relatively small chunks of data independently from
+        /// each other. The preset dictionary should contain typical
+        /// strings that occur in the files being compressed. The most
+        /// probable strings should be near the end of the preset dictionary.
+        ///
+        /// This feature should be used only in special situations. For
+        /// now, it works correctly only with raw encoding and decoding.
+        /// Currently none of the container formats supported by
+        /// liblzma allow preset dictionary when decoding, thus if
+        /// you create a .xz or .lzma file with preset dictionary, it
+        /// cannot be decoded with the regular decoder functions. In the
+        /// future, the .xz format will likely get support for preset
+        /// dictionary though.
+        const(ubyte)[] presetDict;
+
+        /// Number of literal context bits
+        ///
+        /// How many of the highest bits of the previous uncompressed
+        /// eight-bit byte (also known as `literal') are taken into
+        /// account when predicting the bits of the next literal.
+        ///
+        /// E.g. in typical English text, an upper-case letter is
+        /// often followed by a lower-case letter, and a lower-case
+        /// letter is usually followed by another lower-case letter.
+        /// In the US-ASCII character set, the highest three bits are 010
+        /// for upper-case letters and 011 for lower-case letters.
+        /// When lc is at least 3, the literal coding can take advantage of
+        /// this property in the uncompressed data.
+        ///
+        /// There is a limit that applies to literal context bits and literal
+        /// position bits together: lc + lp <= 4. Without this limit the
+        /// decoding could become very slow, which could have security related
+        /// results in some cases like email servers doing virus scanning.
+        /// This limit also simplifies the internal implementation in liblzma.
+        ///
+        /// There may be LZMA1 streams that have lc + lp > 4 (maximum possible
+        /// lc would be 8). It is not possible to decode such streams with
+        /// liblzma.
+        uint lc;
+
+        /// Number of literal position bits
+        /// lp affects what kind of alignment in the uncompressed data is
+        /// assumed when encoding literals. A literal is a single 8-bit byte.
+        /// See pb below for more information about alignment.
+        uint lp;
+
+        /// Number of position bits
+        /// pb affects what kind of alignment in the uncompressed data is
+        /// assumed in general. The default means four-byte alignment
+        /// (2^ pb =2^2=4), which is often a good choice when there's
+        /// no better guess.
+        ///
+        /// When the alignment is known, setting pb accordingly may reduce
+        /// the file size a little. E.g. with text files having one-byte
+        /// alignment (US-ASCII, ISO-8859-*, UTF-8), setting pb=0 can
+        /// improve compression slightly. For UTF-16 text, pb=1 is a good
+        /// choice. If the alignment is an odd number like 3 bytes, pb=0
+        /// might be the best choice.
+        ///
+        /// Even though the assumed alignment can be adjusted with pb and
+        /// lp, LZMA1 and LZMA2 still slightly favor 16-byte alignment.
+        /// It might be worth taking into account when designing file formats
+        /// that are likely to be often compressed with LZMA1 or LZMA2.
+        uint pb;
+
+        /// The compression mode
+        LzmaMode mode;
+
+        /// The nice length of a match.
+        ///
+        /// This determines how many bytes the encoder compares from the match
+        /// candidates when looking for the best match. Once a match of at
+        /// least nice_len bytes long is found, the encoder stops looking for
+        /// better candidates and encodes the match. (Naturally, if the found
+        /// match is actually longer than nice_len, the actual length is
+        /// encoded; it's not truncated to nice_len.)
+        ///
+        /// Bigger values usually increase the compression ratio and
+        /// compression time. For most files, 32 to 128 is a good value,
+        /// which gives very good compression ratio at good speed.
+        ///
+        /// The exact minimum value depends on the match finder. The maximum
+        /// is 273, which is the maximum length of a match that LZMA1 and
+        /// LZMA2 can encode.
+        uint niceLen;
+
+        /// The match finder.
+        LzmaMatchFinder mf;
+
+        /// Maximum search depth in the match finder
+        ///
+        /// For every input byte, match finder searches through the hash chain
+        /// or binary tree in a loop, each iteration going one step deeper in
+        /// the chain or tree. The searching stops if
+        ///  - a match of at least nice_len bytes long is found;
+        ///  - all match candidates from the hash chain or binary tree have
+        ///    been checked; or
+        ///  - maximum search depth is reached.
+        ///
+        /// Maximum search depth is needed to prevent the match finder from
+        /// wasting too much time in case there are lots of short match
+        /// candidates. On the other hand, stopping the search before all
+        /// candidates have been checked can reduce compression ratio.
+        ///
+        /// Setting depth to zero tells liblzma to use an automatic default
+        /// value, that depends on the selected match finder and nice_len.
+        /// The default is in the range [4, 200] or so (it may vary between
+        /// liblzma versions).
+        ///
+        /// Using a bigger depth value than the default can increase
+        /// compression ratio in some cases. There is no strict maximum value,
+        /// but high values (thousands or millions) should be used with care:
+        /// the encoder could remain fast enough with typical input, but
+        /// malicious input could cause the match finder to slow down
+        /// dramatically, possibly creating a denial of service attack.
+        uint depth;
+    }
+
+    /// Advanced parameters for Legacy LZMA compression
+    struct Lzma1AdvancedFilter
+    {
+        mixin LzmaAdvancedOptions!();
+    }
+
+    /// Advanced parameters for LZMA compression
+    struct Lzma2AdvancedFilter
+    {
+        mixin LzmaAdvancedOptions!();
+    }
+
+    /// Raw LZMA filter with encoded properties.
+    /// This is used e.g. in the *.7z archive format.
+    struct LzmaRawFilter
+    {
+        enum Id
+        {
+            delta = 0x03,
+            bcjX86 = 0x04,
+            bcjPowerPc = 0x05,
+            bcjIa64 = 0x06,
+            bcjArm = 0x07,
+            bcjArmThumb = 0x08,
+            bcjSparc = 0x09,
+            lzma1 = 0x11,
+            lzma2 = 0x21,
+        }
+
+        Id id;
+        ubyte[] props;
+    }
+
+    bool isCompressionFilter(LzmaFilter filter) @safe
+    {
+        // dfmt off
+        return filter.match!(
+            (LzmaDeltaFilter f) => false,
+            (LzmaBcjFilter f) => false,
+            (Lzma1PresetFilter f) => true,
+            (Lzma2PresetFilter f) => true,
+            (Lzma1AdvancedFilter f) => true,
+            (Lzma2AdvancedFilter f) => true,
+            (LzmaRawFilter f) {
+                switch (f.id)
+                {
+                case LzmaRawFilter.Id.lzma1:
+                case LzmaRawFilter.Id.lzma2:
+                    return true;
+                default:
+                    return false;
+                }
+            },
+        );
+        // dfmt on
+    }
+
+    private lzma_options_lzma* lzmaPresetToOptions(F)(F filter)
+    {
+        lzma_options_lzma* opts = new lzma_options_lzma;
+
+        uint preset = filter.preset;
+        if (filter.extreme)
+            preset |= LZMA_PRESET_EXTREME;
+
+        enforce(!lzma_lzma_preset(opts, preset), "unsupported LZMA preset");
+
+        return opts;
+    }
+
+    private lzma_options_lzma* lzmaAdvancedToOptions(F)(F filter)
+    {
+        enforce(isMatchFinderSupported(filter.mf), "unsupported LZMA match finder");
+        enforce(isModeSupported(filter.mode), "unsupported LZMA mode");
+
+        lzma_options_lzma* opts = new lzma_options_lzma;
+
+        opts.dict_size = filter.dictSize;
+        if (filter.presetDict.length)
+        {
+            opts.preset_dict = &filter.presetDict[0];
+            opts.preset_dict_size = cast(uint) filter.presetDict.length;
+        }
+        opts.lc = filter.lc;
+        opts.lp = filter.lp;
+        opts.pb = filter.pb;
+        opts.mode = cast(lzma_mode) filter.mode;
+        opts.nice_len = filter.niceLen;
+        opts.mf = cast(lzma_match_finder) filter.mf;
+        opts.depth = filter.depth;
+
+        return opts;
+    }
+
+    private lzma_filter toLzma(LzmaFilter filter) @trusted
+    {
+        // dfmt off
+        return filter.match!(
+            (LzmaDeltaFilter delta) {
+               lzma_options_delta* opt = new lzma_options_delta;
+                opt.type = lzma_delta_type.LZMA_DELTA_TYPE_BYTE;
+                opt.dist = delta.dist;
+                return lzma_filter(LZMA_FILTER_DELTA, cast(void*) opt);
+            },
+            (LzmaBcjFilter bcj) {
+                lzma_options_bcj* opt = new lzma_options_bcj;
+                opt.start_offset = bcj.startOffset;
+                const vli = cast(lzma_vli)(bcj.arch);
+                return lzma_filter(vli, cast(void*) opt);
+            },
+            (Lzma1PresetFilter f) {
+                auto opts = lzmaPresetToOptions(f);
+                return lzma_filter(LZMA_FILTER_LZMA1, cast(void*)opts);
+            },
+            (Lzma2PresetFilter f) {
+                auto opts = lzmaPresetToOptions(f);
+                return lzma_filter(LZMA_FILTER_LZMA2, cast(void*)opts);
+            },
+            (Lzma1AdvancedFilter f) {
+                auto opts = lzmaAdvancedToOptions(f);
+                return lzma_filter(LZMA_FILTER_LZMA1, cast(void*)opts);
+            },
+            (Lzma2AdvancedFilter f) {
+                auto opts = lzmaAdvancedToOptions(f);
+                return lzma_filter(LZMA_FILTER_LZMA2, cast(void*)opts);
+            },
+            (LzmaRawFilter f) {
+                lzma_filter res;
+                final switch (f.id)
+                {
+                case LzmaRawFilter.Id.delta:
+                    res.id = LZMA_FILTER_DELTA;
+                    break;
+                case LzmaRawFilter.Id.bcjX86:
+                    res.id = LZMA_FILTER_X86;
+                    break;
+                case LzmaRawFilter.Id.bcjPowerPc:
+                    res.id = LZMA_FILTER_POWERPC;
+                    break;
+                case LzmaRawFilter.Id.bcjIa64:
+                    res.id = LZMA_FILTER_IA64;
+                    break;
+                case LzmaRawFilter.Id.bcjArm:
+                    res.id = LZMA_FILTER_ARM;
+                    break;
+                case LzmaRawFilter.Id.bcjArmThumb:
+                    res.id = LZMA_FILTER_ARMTHUMB;
+                    break;
+                case LzmaRawFilter.Id.bcjSparc:
+                    res.id = LZMA_FILTER_SPARC;
+                    break;
+                case LzmaRawFilter.Id.lzma1:
+                    res.id = LZMA_FILTER_LZMA1;
+                    break;
+                case LzmaRawFilter.Id.lzma2:
+                    res.id = LZMA_FILTER_LZMA2;
+                    break;
+                }
+                lzma_allocator alloc;
+                alloc.alloc = &(gcAlloc!size_t);
+                alloc.free = &gcFree;
+                const ptr = f.props.length ? &f.props[0] : null;
+                lzma_properties_decode(&res, &alloc, ptr, f.props.length);
+                return res;
+            }
+        );
+        // dfmt on
+    }
+
+    private lzma_filter[] buildFilterChain(LzmaFilter[] filters) @safe
+    {
+        enforce(filters.length < 5, "Too large LZMA filter chain (maximum is 4)");
+
+        lzma_filter[] res = new lzma_filter[5];
+
+        foreach (i; 0 .. filters.length)
+            res[i] = toLzma(filters[i]);
+
+        foreach (i; filters.length .. 5)
+            res[i].id = LZMA_VLI_UNKNOWN;
+
+        return res;
+    }
+
     final class LzmaStream : SquizStream
     {
         mixin ZlibLikeStreamImpl!(lzma_stream);
         mixin ZlibLikeTotalInOutImpl!();
 
         private lzma_allocator alloc;
-        private lzma_options_delta optsDelta;
-        private lzma_options_lzma optsLzma;
         private lzma_filter[] filterChain;
 
         this() @safe
@@ -1645,121 +2146,21 @@ version (HaveSquizLzma)
             alloc.free = &gcFree;
             strm.allocator = &alloc;
         }
-
-        private lzma_filter[] buildFilterChain(LzmaFormat format, LzmaFilter[] filters,
-        uint preset, uint deltaDist) @safe
-        {
-            lzma_filter[] res;
-            foreach (f; filters)
-            {
-                final switch (f)
-                {
-                case LzmaFilter.delta:
-                    optsDelta.dist = deltaDist;
-                    res ~= lzma_filter(LZMA_FILTER_DELTA, cast(void*)&optsDelta);
-                    break;
-                case LzmaFilter.bcjX86:
-                    res ~= lzma_filter(LZMA_FILTER_X86, null);
-                    break;
-                case LzmaFilter.bcjPowerPc:
-                    res ~= lzma_filter(LZMA_FILTER_POWERPC, null);
-                    break;
-                case LzmaFilter.bcjIa64:
-                    res ~= lzma_filter(LZMA_FILTER_IA64, null);
-                    break;
-                case LzmaFilter.bcjArm:
-                    res ~= lzma_filter(LZMA_FILTER_ARM, null);
-                    break;
-                case LzmaFilter.bcjArmThumb:
-                    res ~= lzma_filter(LZMA_FILTER_ARMTHUMB, null);
-                    break;
-                case LzmaFilter.bcjSparc:
-                    res ~= lzma_filter(LZMA_FILTER_SPARC, null);
-                    break;
-                }
-            }
-
-            enforce(res.length <= 3, "Too many filters supplied");
-
-            if (format != LzmaFormat.rawCopy)
-            {
-                (() @trusted => lzma_lzma_preset(&optsLzma, preset))();
-                const compFilter = format.isLegacy ? LZMA_FILTER_LZMA1 : LZMA_FILTER_LZMA2;
-                res ~= lzma_filter(compFilter, cast(void*)&optsLzma);
-            }
-
-            res ~= lzma_filter(LZMA_VLI_UNKNOWN, null); // end marker
-
-            filterChain = res;
-            return res;
-        }
-
     }
 
     /// Header/trailer format for Lzma compression
     enum LzmaFormat
     {
-        /// Lzma with Xz format, suitable to write *.xz files
+        /// Xz file format, suitable to write *.xz files
         xz,
-        /// LZMA1 encoding and format, suitable for legacy *.lzma files
+        /// Legacy LZMA file format, suitable for *.lzma files
         /// This format doesn't support filters.
         legacy,
-        /// Raw LZMA2 compression, without header/trailer.
+        /// Raw format, without header/trailer.
         /// Use this to include compressed LZMA data in
         /// a container defined externally (e.g. this is used
         /// for the *.7z archives)
         raw,
-        /// Raw LZMA1 compression, without header/trailer.
-        /// This one is still found in some *.7z files.
-        rawLegacy,
-        /// Just copy bytes out.
-        /// You may use this in combination with a filter to observe its
-        /// effect, but has otherwise no use.
-        rawCopy,
-    }
-
-    /// Whether this is a legacy format
-    bool isLegacy(LzmaFormat format) @safe pure nothrow @nogc
-    {
-        return format == LzmaFormat.legacy || format == LzmaFormat.rawLegacy;
-    }
-
-    /// Whether this is a raw format
-    bool isRaw(LzmaFormat format) @safe pure nothrow @nogc
-    {
-        return cast(int) format >= cast(int) LzmaFormat.raw;
-    }
-
-    /// Filters to use with the LZMA compression.
-    ///
-    /// Up to 3 filters can be used from this list.
-    /// These filters transform the input to increase
-    /// redundancy of the data supplied to the LZMA compression.
-    enum LzmaFilter
-    {
-        /// Delta filter, which store differences between bytes
-        /// to produce more repetitive data in some circumstances.
-        /// Works with `deltaDist` parameter of `CompressLzma`.
-        delta,
-
-        /// BCJ (Branch/Call/Jump) filters aim optimize machine code
-        /// compression by converting relative branches, calls and jumps
-        /// to absolute addresses. This increases redundancy and can be
-        /// exploited by the LZMA compression.
-        ///
-        /// BCJ filters are available for a set of CPU architectures.
-        /// Use one (or two) of them when compressing compiled binaries.
-        bcjX86,
-        /// ditto
-        bcjPowerPc,
-        /// ditto
-        bcjIa64,
-        /// ditto
-        bcjArm,
-        /// ditto
-        bcjArmThumb,
-        /// ditto
-        bcjSparc,
     }
 
     /// Integrity check to include in the compressed data
@@ -1797,10 +2198,11 @@ version (HaveSquizLzma)
         return squiz(input, CompressLzma.init, chunkSize);
     }
 
-    auto compressLzmaRaw(I)(I input, size_t chunkSize = defaultChunkSize)
+    auto compressLzmaRaw(I)(I input, LzmaFilter[] filters, size_t chunkSize = defaultChunkSize)
     {
         CompressLzma algo;
         algo.format = LzmaFormat.raw;
+        algo.filters = filters;
         return squiz(input, algo, chunkSize);
     }
 
@@ -1813,53 +2215,49 @@ version (HaveSquizLzma)
         /// The format of the compressed stream
         LzmaFormat format;
 
+        /// Filters to include in the encoding, including the compression filter.
+        /// Maximum four filters can be provided.
+        /// For Xz format, if this array has no compression filter, a LZMA2 filter will be appended.
+        /// For Raw format, the programmer has the responsibility to set all the filters correctly.
+        /// Not supported by the legacy format
+        LzmaFilter[] filters;
+
         /// The integrity check to include in compressed stream.
         /// Only used with XZ format.
         LzmaCheck check = LzmaCheck.crc64;
 
-        /// The compression preset between 0 (fast) to 9 (higher compression).
-        /// The default is 6.
-        uint preset = 6;
-
-        /// Makes the encoding significantly slower for marginal compression
-        /// improvement. Only useful if you don't mind about CPU time at all.
-        Flag!"extreme" extreme;
-
-        /// Filters to include in the encoding.
-        /// Maximum three filters can be provided.
-        /// For most input, no filtering is necessary.
-        LzmaFilter[] filters;
-
-        /// Number of bytes between 1 and 256 to use for the Delta filter.
-        /// For example for 16bit PCM stero audio, you should use 4.
-        /// For RGB data 8bit per channel, you should use 3.
-        uint deltaDist;
+        /// Compression preset used for the legacy format
+        uint legacyPreset = 6;
 
         alias Stream = LzmaStream;
 
         private void initStream(Stream stream) @trusted
         {
-            uint pres = preset;
-            if (extreme)
-                pres |= LZMA_PRESET_EXTREME;
+            import std.algorithm : any;
 
             lzma_ret res;
             final switch (format)
             {
             case LzmaFormat.xz:
-                const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
-                res = lzma_stream_encoder(&stream.strm, chain.ptr, check.toLzma());
+                LzmaFilter[] chain;
+                if (!filters.any!(f => f.isCompressionFilter()))
+                    chain = filters.dup ~ LzmaFilter(Lzma2PresetFilter(6));
+                else
+                    chain = filters;
+
+                const lzmaChain = buildFilterChain(chain);
+                res = lzma_stream_encoder(&stream.strm, lzmaChain.ptr, check.toLzma());
                 break;
             case LzmaFormat.legacy:
                 enforce(filters.length == 0, "Filters are not supported with the legacy format");
-                lzma_lzma_preset(&stream.optsLzma, preset);
-                res = lzma_alone_encoder(&stream.strm, &stream.optsLzma);
+                enforce(legacyPreset >= 1 && legacyPreset <= 9);
+                auto opts = new lzma_options_lzma;
+                lzma_lzma_preset(opts, legacyPreset);
+                res = lzma_alone_encoder(&stream.strm, opts);
                 break;
             case LzmaFormat.raw:
-            case LzmaFormat.rawLegacy:
-            case LzmaFormat.rawCopy:
-                const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
-                res = lzma_raw_encoder(&stream.strm, chain.ptr);
+                const lzmaChain = buildFilterChain(filters);
+                res = lzma_raw_encoder(&stream.strm, lzmaChain.ptr);
                 break;
             }
 
@@ -1897,10 +2295,11 @@ version (HaveSquizLzma)
         return squiz(input, DecompressLzma.init, chunkSize);
     }
 
-    auto decompressLzmaRaw(I)(I input, size_t chunkSize = defaultChunkSize)
+    auto decompressLzmaRaw(I)(I input, LzmaFilter[] filters, size_t chunkSize = defaultChunkSize)
     {
         DecompressLzma algo;
         algo.format = LzmaFormat.raw;
+        algo.rawFilters = filters;
         return squiz(input, algo, chunkSize);
     }
 
@@ -1917,19 +2316,12 @@ version (HaveSquizLzma)
         /// by default no limit is enforced
         size_t memLimit = size_t.max;
 
-        /// Parameters for the raw decompression.
-        /// They are the same than for the compression.
+        /// Filters for the raw decompression.
         /// As there is no header to tell Lzma what filters were used during
         /// compression, it is the responsibility of the programmer to
         /// correctly ensure that the same options are used for decompression.
-        /// All these options are ignored when decompressing .xz stream.
-        uint preset = 6;
-        /// ditto
-        Flag!"extreme" extreme;
-        /// ditto
-        LzmaFilter[] filters;
-        /// ditto
-        uint deltaDist;
+        /// Ignored when decompressing .xz stream.
+        LzmaFilter[] rawFilters;
 
         alias Stream = LzmaStream;
 
@@ -1944,10 +2336,7 @@ version (HaveSquizLzma)
         this(CompressLzma compress) @safe
         {
             format = compress.format;
-            preset = compress.preset;
-            extreme = compress.extreme;
-            filters = compress.filters;
-            deltaDist = compress.deltaDist;
+            rawFilters = compress.filters;
         }
 
         private void initStream(Stream stream) @trusted
@@ -1967,15 +2356,9 @@ version (HaveSquizLzma)
                 res = lzma_alone_decoder(&stream.strm, memlim);
                 break;
             case LzmaFormat.raw:
-            case LzmaFormat.rawLegacy:
-            case LzmaFormat.rawCopy:
-                uint pres = preset;
-                if (extreme)
-                    pres |= LZMA_PRESET_EXTREME;
-
-                const chain = stream.buildFilterChain(format, filters, pres, deltaDist);
-
+                const chain = buildFilterChain(rawFilters);
                 res = lzma_raw_decoder(&stream.strm, chain.ptr);
+                break;
             }
             enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
         }
@@ -2088,8 +2471,7 @@ version (HaveSquizLzma)
             .join();
 
         CompressLzma comp;
-        comp.filters ~= LzmaFilter.delta;
-        comp.deltaDist = 8; // sequential data of 8 byte integers
+        comp.filters ~= LzmaFilter(LzmaDeltaFilter(8)); // sequential data of 8 byte integers
 
         const withDelta = only(input)
             .squiz(comp)
@@ -2121,12 +2503,14 @@ version (HaveSquizLzma)
             .compressXz()
             .join();
 
+        auto filters = [LzmaFilter(Lzma2PresetFilter())];
+
         const squized = only(input)
-            .compressLzmaRaw()
+            .compressLzmaRaw(filters)
             .join();
 
         const output = only(squized)
-            .decompressLzmaRaw()
+            .decompressLzmaRaw(filters)
             .join();
 
         assert(output == input);
@@ -2150,13 +2534,15 @@ version (HaveSquizLzma)
         const input = generateSequentialData(len, 1245, 27).join();
 
         const reference = only(input)
-            .compressLzmaRaw()
+            .compressLzmaRaw([LzmaFilter(Lzma2PresetFilter())])
             .join();
 
         CompressLzma comp;
         comp.format = LzmaFormat.raw;
-        comp.filters ~= LzmaFilter.delta;
-        comp.deltaDist = 8; // sequential data of 8 byte integers
+        comp.filters = [
+            LzmaFilter(LzmaDeltaFilter(8)), // sequential data of 8 byte integers
+            LzmaFilter(Lzma2PresetFilter()),
+        ];
 
         const withDelta = only(input)
             .squiz(comp)
@@ -2215,7 +2601,10 @@ version (HaveSquizLzma)
         const phrase = cast(const(ubyte)[]) "Some very repetitive phrase.\n";
         const input = generateRepetitiveData(len, phrase).join();
 
-        auto comp = CompressLzma(LzmaFormat.rawLegacy);
+        CompressLzma comp;
+        comp.format = LzmaFormat.raw;
+        comp.filters = [LzmaFilter(Lzma1PresetFilter())];
+
         auto decomp = DecompressLzma(comp);
 
         const squized = only(input)
@@ -2250,9 +2639,11 @@ version (HaveSquizLzma)
             .join();
 
         CompressLzma comp;
-        comp.format = LzmaFormat.rawLegacy;
-        comp.filters ~= LzmaFilter.delta;
-        comp.deltaDist = 8; // sequential data of 8 byte integers
+        comp.format = LzmaFormat.raw;
+        comp.filters = [
+            LzmaFilter(LzmaDeltaFilter(8)), // sequential data of 8 byte integers
+            LzmaFilter(Lzma1PresetFilter()),
+        ];
 
         auto decomp = DecompressLzma(comp);
 

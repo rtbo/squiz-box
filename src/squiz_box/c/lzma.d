@@ -344,7 +344,7 @@ struct lzma_options_lzma
 {
     uint32_t dict_size;
 
-    const uint8_t* preset_dict;
+    const (uint8_t)* preset_dict;
 
     uint32_t preset_dict_size;
 
