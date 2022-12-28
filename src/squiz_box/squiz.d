@@ -226,6 +226,187 @@ interface SquizStream
     @property size_t totalOutput() const @safe;
 }
 
+/// Build an algo that process data over the provided streams, in the given order
+SquizAlgo squizCompoundAlgo(SquizAlgo[] algos)
+{
+    return new SquizCompoundAlgo(algos);
+}
+
+private class SquizCompoundAlgo : SquizAlgo
+{
+    private SquizAlgo[] algos;
+    alias Stream = SquizCompoundStream;
+
+    this(SquizAlgo[] algos)
+    {
+        assert(algos.length >= 1);
+
+        this.algos = algos;
+    }
+
+    private Stream checkStream(SquizStream stream) @safe
+    {
+        auto s = cast(Stream) stream;
+        assert(s, "provided stream is not produced by this algorithm");
+        assert(s.streams.length == algos.length, "provided stream is not produced by this algorithm");
+        return s;
+    }
+
+    override SquizStream initialize() @safe
+    {
+        import std.algorithm : map;
+
+        return new SquizCompoundStream(algos.map!(a => a.initialize()).array);
+    }
+
+    override Flag!"streamEnded" process(SquizStream stream, Flag!"lastChunk" lastChunk)
+    {
+        import std.stdio;
+
+        auto cs = checkStream(stream);
+
+        bool prevEnded = cast(bool) lastChunk;
+
+        foreach (i; 0 .. algos.length)
+        {
+            auto alg = algos[i];
+            auto stm = cs.streams[i];
+
+            const bool first = i == 0;
+            const bool last = i == cast(ptrdiff_t) algos.length - 1;
+
+            if (!last && !stm.output.length)
+            {
+                stm.output = cs.innerBuffer(i);
+                cs.cursor(i, 0);
+            }
+
+            if (!first)
+            {
+                auto prevStm = cs.streams[i - 1];
+                auto prevBuf = cs.innerBuffer(i - 1);
+                auto prevCursor = cs.cursor(i - 1);
+                stm.input = prevBuf[prevCursor .. $ - prevStm.output.length];
+            }
+
+            const inp1 = stm.input.length;
+            bool ended = last ? false : cs.ended(i);
+
+            while ((stm.input.length || prevEnded) && stm.output.length && !ended)
+            {
+                ended = cast(bool) alg.process(stm, cast(Flag!"lastChunk") prevEnded);
+            }
+            assert(stm.input.length == 0 || stm.output.length == 0);
+
+            const inp2 = stm.input.length;
+            const read = inp1 - inp2;
+
+            prevEnded = ended;
+
+            if (!first)
+                cs.cursor(i - 1, cs.cursor(i - 1) + read);
+            if (!last)
+                cs.ended(i, ended);
+        }
+
+        return cast(Flag!"streamEnded") prevEnded;
+    }
+
+    void reset(SquizStream stream) @safe
+    {
+        auto cs = checkStream(stream);
+        foreach (i; 0 .. algos.length)
+            algos[i].reset(cs.streams[i]);
+    }
+
+    void end(SquizStream stream) @safe
+    {
+        auto cs = checkStream(stream);
+        foreach (i; 0 .. algos.length)
+            algos[i].end(cs.streams[i]);
+    }
+}
+
+private class SquizCompoundStream : SquizStream
+{
+    private SquizStream[] streams;
+    private ubyte[] buffer;
+    private size_t[] cursors;
+    private bool[] endeds;
+
+    enum innerBufferSize = 8192;
+
+    this(SquizStream[] streams) @safe
+    {
+        assert(streams.length >= 1);
+
+        this.streams = streams;
+        if (streams.length > 1)
+        {
+            const num = cast(ptrdiff_t) streams.length - 1;
+            this.buffer = new ubyte[innerBufferSize * num];
+            this.cursors = new size_t[num];
+            this.endeds = new bool[num];
+        }
+    }
+
+    // buffer between i and i+1
+    private ubyte[] innerBuffer(size_t i) @safe
+    {
+        return buffer[i * innerBufferSize .. (i + 1) * innerBufferSize];
+    }
+
+    private size_t cursor(size_t i) @safe
+    {
+        return cursors[i];
+    }
+
+    private void cursor(size_t i, size_t val) @safe
+    {
+        cursors[i] = val;
+    }
+
+    private bool ended(size_t i) @safe
+    {
+        return endeds[i];
+    }
+
+    private void ended(size_t i, bool val) @safe
+    {
+        endeds[i] = val;
+    }
+
+    override @property const(ubyte)[] input() const @safe
+    {
+        return streams[0].input;
+    }
+
+    override @property void input(const(ubyte)[] inp) @safe
+    {
+        streams[0].input = inp;
+    }
+
+    override @property size_t totalInput() const @safe
+    {
+        return streams[0].totalInput;
+    }
+
+    override @property inout(ubyte)[] output() inout @safe
+    {
+        return streams[$ - 1].output;
+    }
+
+    override @property void output(ubyte[] outp) @safe
+    {
+        streams[$ - 1].output = outp;
+    }
+
+    override @property size_t totalOutput() const @safe
+    {
+        return streams[$ - 1].totalOutput;
+    }
+}
+
 private template isZlibLikeStream(S)
 {
     enum isZlibLikeStream = is(typeof((S stream) {
