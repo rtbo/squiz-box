@@ -1665,6 +1665,11 @@ version (HaveSquizLzma)
         ///  - should be 3 for raw RGB data
         ///  - should be 4 for raw 16bit PCM stereo data
         uint dist;
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     /// BCJ (Branch/Call/Jump) filters aim optimize machine code
@@ -1688,6 +1693,11 @@ version (HaveSquizLzma)
 
         Arch arch;
         uint startOffset;
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     mixin template LzmaPresetOptions()
@@ -1706,6 +1716,11 @@ version (HaveSquizLzma)
     struct Lzma1PresetFilter
     {
         mixin LzmaPresetOptions!();
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     /// LZMA compression (aka. LZMA2).
@@ -1713,6 +1728,11 @@ version (HaveSquizLzma)
     struct Lzma2PresetFilter
     {
         mixin LzmaPresetOptions!();
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     /+
@@ -1952,12 +1972,22 @@ version (HaveSquizLzma)
     struct Lzma1AdvancedFilter
     {
         mixin LzmaAdvancedOptions!();
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     /// Advanced parameters for LZMA compression
     struct Lzma2AdvancedFilter
     {
         mixin LzmaAdvancedOptions!();
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     /// Raw LZMA filter with encoded properties.
@@ -1978,7 +2008,66 @@ version (HaveSquizLzma)
         }
 
         Id id;
-        ubyte[] props;
+        const(ubyte)[] props;
+
+        /// construction helper
+        static LzmaRawFilter delta(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.delta, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjX86(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjX86, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjPowerPc(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjPowerPc, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjIa64(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjIa64, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjArm(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjArm, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjArmThumb(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjArmThumb, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter bcjSparc(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.bcjSparc, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter lzma1(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.lzma1, props);
+        }
+
+        /// ditto
+        static LzmaRawFilter lzma2(const(ubyte)[] props)
+        {
+            return LzmaRawFilter(LzmaRawFilter.Id.lzma2, props);
+        }
+
+        @property inout(LzmaFilter) into() inout
+        {
+            return LzmaFilter(this);
+        }
     }
 
     bool isCompressionFilter(LzmaFilter filter) @safe
@@ -2312,10 +2401,6 @@ version (HaveSquizLzma)
         /// The format of the compressed stream
         LzmaFormat format;
 
-        /// The memory usage limit in bytes.
-        /// by default no limit is enforced
-        size_t memLimit = size_t.max;
-
         /// Filters for the raw decompression.
         /// As there is no header to tell Lzma what filters were used during
         /// compression, it is the responsibility of the programmer to
@@ -2323,20 +2408,34 @@ version (HaveSquizLzma)
         /// Ignored when decompressing .xz stream.
         LzmaFilter[] rawFilters;
 
+        /// The memory usage limit in bytes.
+        /// by default no limit is enforced
+        size_t memLimit = size_t.max;
+
         alias Stream = LzmaStream;
 
-        this(LzmaFormat format) @safe
+        this(LzmaFormat format, size_t memLimit = size_t.max) @safe
         {
             this.format = format;
+            this.memLimit = memLimit;
         }
 
         /// convenience constructor to copy parameters of the compression
         /// for the decompression. Especially useful for the raw decompression,
         /// to ensure that the parameters fit the ones used for compression.
-        this(CompressLzma compress) @safe
+        this(CompressLzma compress, size_t memLimit = size_t.max) @safe
         {
-            format = compress.format;
-            rawFilters = compress.filters;
+            this.format = compress.format;
+            this.rawFilters = compress.filters;
+            this.memLimit = memLimit;
+        }
+
+        /// Builds a raw decompression algorithm with the provided filters
+        this(LzmaFilter[] rawFilters, size_t memLimit = size_t.max)
+        {
+            this.format = LzmaFormat.raw;
+            this.rawFilters = rawFilters;
+            this.memLimit = memLimit;
         }
 
         private void initStream(Stream stream) @trusted
