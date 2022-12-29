@@ -16,7 +16,12 @@
                 "$PACKAGE_DIR/windows-x64/lzma.lib",
                 "$PACKAGE_DIR/windows-x64/zstd.lib"
             ],
-            "versions": [
+            "versions-posix": [
+                "HaveSquizBzip2",
+                "HaveSquizLzma",
+                "HaveSquizZstandard"
+            ],
+            "versions-windows": [
                 "HaveSquizBzip2",
                 "HaveSquizLzma",
                 "HaveSquizZstandard",
