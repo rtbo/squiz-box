@@ -646,6 +646,7 @@ struct FilesInfo
                     const data = cursor.getValue!long();
                     if (data >= long.max - hnsecsFrom1601)
                         bad7z(cursor.name, "Inconsistent file timestamp");
+                    f.setTime(propId, data);
                 }
                 break;
             case PropId.attributes:
