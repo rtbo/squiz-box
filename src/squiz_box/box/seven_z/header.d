@@ -72,7 +72,7 @@ void enforceGetPropId(C)(C cursor, PropId propId, string section = __FUNCTION__)
     auto id = cast(PropId) cursor.get;
     if (id != propId)
         throw new Bad7zArchiveException(
-            cursor.name,
+            cursor.source,
             format!"Expected Property Id %s but found %s in '%s'"(
                 propIdName(propId), propIdName(id), section
         )
@@ -110,18 +110,18 @@ struct SignatureHeader
         cursor.readValue(&rep);
         enforce(
             rep.signature == magicBytes,
-            new NotA7zArchiveException(cursor.name, "Not starting by magic bytes"),
+            new NotA7zArchiveException(cursor.source, "Not starting by magic bytes"),
         );
 
         const crc = Crc32.calc(&(rep.signature[0]) + 12, 20);
         if (crc != rep.headerCrc.val)
-            bad7z(cursor.name, "Could not verify signature header CRC-32");
+            bad7z(cursor.source, "Could not verify signature header CRC-32");
 
         SignatureHeader res = void;
         // check for 0.4
         res.ver = rep.ver[0] * 10 + rep.ver[1];
         if (res.ver != 4)
-            unsupported7z(cursor.name, format!"Unsupported 7z version %s.%s"(rep.ver[0], rep.ver[1]));
+            unsupported7z(cursor.source, format!"Unsupported 7z version %s.%s"(rep.ver[0], rep.ver[1]));
 
         res.headerOffset = rep.nextHeaderOffset.val;
         res.headerSize = rep.nextHeaderSize.val;
@@ -156,7 +156,7 @@ struct Header
         else if (prop == PropId.encodedHeader)
             return readEncoded(headerCursor, mainCursor, packStartOffset);
 
-        unexpectedPropId(mainCursor.name, prop);
+        unexpectedPropId(mainCursor.source, prop);
     }
 
     static Header readPlain(HC, C)(HC headerCursor, C mainCursor, ulong packStartOffset)
@@ -174,7 +174,7 @@ struct Header
         }
 
         if (nextId != PropId.end)
-            bad7z(headerCursor.name, "Expected end property id");
+            bad7z(headerCursor.source, "Expected end property id");
 
         return res;
     }
@@ -210,7 +210,7 @@ struct Header
             io.writeln();
         }
 
-        auto hc = new ArrayCursor(unpacked, mainCursor.name);
+        auto hc = new ArrayCursor(unpacked, mainCursor.source);
         hc.enforceGetPropId(PropId.header);
         return readPlain(hc, mainCursor, packStartOffset);
     }
@@ -244,12 +244,12 @@ struct StreamsInfo
                 res.subStreamsInfo = trace7z!(() => SubStreamsInfo.read(cursor, res));
                 break;
             default:
-                unexpectedPropId(cursor.name, propId);
+                unexpectedPropId(cursor.source, propId);
             }
         });
 
         if (res.numStreams != res.numFolders)
-            unsupported7z(cursor.name, "Only single stream folders are supported");
+            unsupported7z(cursor.source, "Only single stream folders are supported");
 
         return res;
     }
@@ -359,7 +359,7 @@ struct PackInfo
                 }
                 break;
             default:
-                unexpectedPropId(cursor.name, propId);
+                unexpectedPropId(cursor.source, propId);
             }
         });
 
@@ -379,7 +379,7 @@ struct CodersInfo
         const numFolders = cursor.readUint32();
         const bool ext = cursor.get != 0;
         if (ext)
-            unsupported7z(cursor.name, "Unsupported out-of-band folder definition");
+            unsupported7z(cursor.source, "Unsupported out-of-band folder definition");
 
         CodersInfo res;
         res.folderInfos = hatch!(() => trace7z!(() => FolderInfo.read(cursor)))
@@ -406,7 +406,7 @@ struct CodersInfo
                 }
                 break;
             default:
-                unexpectedPropId(cursor.name, propId);
+                unexpectedPropId(cursor.source, propId);
             }
         });
         return res;
@@ -467,7 +467,7 @@ struct SubStreamsInfo
                 res.readCrcs(cursor, streamsInfo);
                 break;
             default:
-                unexpectedPropId(cursor.name, propId);
+                unexpectedPropId(cursor.source, propId);
             }
         });
 
@@ -577,7 +577,7 @@ struct FilesInfo
             scope (success)
             {
                 if (cursor.pos > nextPos)
-                    bad7z(cursor.name, format!"Inconsistent file properties: %s"(propId));
+                    bad7z(cursor.source, format!"Inconsistent file properties: %s"(propId));
                 cursor.seek(nextPos);
             }
 
@@ -614,7 +614,7 @@ struct FilesInfo
                 //const defined = cursor.readBooleanList(numFiles);
                 const external = !!cursor.get;
                 if (external)
-                    unsupported7z(cursor.name, "Out-of-band file name");
+                    unsupported7z(cursor.source, "Out-of-band file name");
                 foreach (i, ref f; res.files)
                 {
                     import std.encoding : transcode;
@@ -638,14 +638,14 @@ struct FilesInfo
                 const defined = cursor.readBooleanList(numFiles);
                 const external = !!cursor.get;
                 if (external)
-                    unsupported7z(cursor.name, "Out-of-band file timestamp");
+                    unsupported7z(cursor.source, "Out-of-band file timestamp");
                 foreach (i, ref f; res.files)
                 {
                     if (!defined[i])
                     continue;
                     const data = cursor.getValue!long();
                     if (data >= long.max - hnsecsFrom1601)
-                        bad7z(cursor.name, "Inconsistent file timestamp");
+                        bad7z(cursor.source, "Inconsistent file timestamp");
                     f.setTime(propId, data);
                 }
                 break;
@@ -653,7 +653,7 @@ struct FilesInfo
                 const defined = cursor.readBooleanList(numFiles);
                 const external = !!cursor.get;
                 if (external)
-                    unsupported7z(cursor.name, "Out-of-band file timestamp");
+                    unsupported7z(cursor.source, "Out-of-band file timestamp");
                 foreach (i, ref f; res.files)
                 {
                     if (!defined[i])
@@ -663,7 +663,7 @@ struct FilesInfo
                 }
                 break;
             default:
-                unexpectedPropId(cursor.name, propId);
+                unexpectedPropId(cursor.source, propId);
             }
         });
 
@@ -738,10 +738,10 @@ struct CoderInfo
     {
         const flags = CoderFlags(cursor.get);
         if (flags.isComplexCoder)
-            unsupported7z(cursor.name, "unsupported complex coder");
+            unsupported7z(cursor.source, "unsupported complex coder");
 
         if (flags.idSize < 1 || flags.idSize > 4)
-            bad7z(cursor.name, format!"Improper coder id size: %s"(flags.idSize));
+            bad7z(cursor.source, format!"Improper coder id size: %s"(flags.idSize));
 
         ubyte[4] idBuf;
         ubyte[] idSlice = idBuf[0 .. flags.idSize];

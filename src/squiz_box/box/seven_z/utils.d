@@ -95,7 +95,7 @@ const(ubyte)[] readArray(C)(C cursor, size_t len, string msg = null)
     }
 
     if (res.length != len)
-        bad7z(cursor.name, msg ? msg : "not enough bytes");
+        bad7z(cursor.source, msg ? msg : "not enough bytes");
 
     return res;
 }

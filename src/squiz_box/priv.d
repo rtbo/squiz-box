@@ -31,7 +31,7 @@ interface Cursor
     /// The name of the data source
     /// For FileCursor, this will be the filename,
     /// otherwise a description of the type of data.
-    @property string name();
+    @property string source();
 
     /// Position in the stream (how many bytes read so far)
     @property ulong pos();
@@ -101,22 +101,22 @@ interface SearchableCursor : Cursor
 final class ByteRangeCursor(BR) : Cursor if (isByteRange!BR)
 {
     private BR _input;
-    private string _name;
+    private string _source;
     private ulong _pos;
     private ByteChunk _chunk;
 
-    this(BR input, string name = "Byte Range")
+    this(BR input, string source = "Byte Range")
     {
         _input = input;
-        _name = name;
+        _source = source;
 
         if (!_input.empty)
             _chunk = _input.front;
     }
 
-    @property string name()
+    @property string source()
     {
-        return _name;
+        return _source;
     }
 
     @property ulong pos()
@@ -197,17 +197,17 @@ final class ArrayCursor : SearchableCursor
 {
     private const(ubyte)[] _array;
     private size_t _pos;
-    private string _name;
+    private string _source;
 
-    this(const(ubyte)[] array, string name = "Byte Array")
+    this(const(ubyte)[] array, string source = "Byte Array")
     {
         _array = array;
-        _name = name;
+        _source = source;
     }
 
-    @property string name()
+    @property string source()
     {
-        return _name;
+        return _source;
     }
 
     @property ulong pos()
@@ -299,7 +299,7 @@ final class FileCursor : SearchableCursor
             _buffer = new ubyte[bufSize];
     }
 
-    @property string name()
+    @property string source()
     {
         return _file.name;
     }

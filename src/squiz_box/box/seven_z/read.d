@@ -56,9 +56,9 @@ private struct Unbox7z(C) if (is(C : SearchableCursor))
         const headerBytes = cursor.readArray(signHeader.headerSize);
         const headerCrc = Crc32.calc(headerBytes);
         if (headerCrc != signHeader.headerCrc)
-            bad7z(cursor.name, "Could not verify header integrity");
+            bad7z(cursor.source, "Could not verify header integrity");
 
-        auto headerCursor = new ArrayCursor(headerBytes, cursor.name);
+        auto headerCursor = new ArrayCursor(headerBytes, cursor.source);
 
         header = trace7z!(() => Header.read(headerCursor, cursor, packStartOffset));
     }
