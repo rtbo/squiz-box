@@ -19,13 +19,13 @@ shared static this()
     mkdir(_dataGenPath);
     mkdir(dataGenPath("folder"));
 
-    const ubyte[] content1 = cast(const(ubyte[]))"File 1\n";
-    const ubyte[] content2 = cast(const(ubyte[]))"file 2\n";
-    const ubyte[] content3 = cast(const(ubyte[]))"File with 666 permissions\n";
+    const ubyte[] content1 = cast(const(ubyte[])) "File 1\n";
+    const ubyte[] content2 = cast(const(ubyte[])) "file 2\n";
+    const ubyte[] content3 = cast(const(ubyte[])) "File with 666 permissions\n";
 
-    write(dataGenPath("file1.txt"), cast(const(void)[])content1);
+    write(dataGenPath("file1.txt"), cast(const(void)[]) content1);
     repeat(content2).take(503).writeBinaryFile(dataGenPath("file 2.txt"));
-    write(dataGenPath("folder", "chmod 666.txt"), cast(const(void)[])content3);
+    write(dataGenPath("folder", "chmod 666.txt"), cast(const(void)[]) content3);
 
     version (Posix)
     {
@@ -103,12 +103,12 @@ struct Path
 /// start a process and return sha1sum of stdout
 string sha1sumProcessStdout(string[] args)
 {
-    import std.algorithm :each;
+    import std.algorithm : each;
     import std.exception : enforce;
     import std.process : pipeProcess, Redirect, wait;
 
     auto pipes = pipeProcess(args, Redirect.stdout);
-    scope(exit)
+    scope (exit)
     {
         enforce(wait(pipes.pid) == 0);
     }
@@ -122,7 +122,6 @@ string sha1sumProcessStdout(string[] args)
     const hash = sha1.finish();
     return toHexString(hash[]);
 }
-
 
 /// Return a byte range that generates potentially very large amount of binary data.
 /// The data contains _num_ bytes in the form of 64 bits integers,
@@ -355,31 +354,55 @@ unittest
     import std.datetime.stopwatch : benchmark;
     import std.stdio : writefln;
 
-    const sz = 1024*1024;
+    const sz = 1024 * 1024;
     const ubyte[] data = generateRandomData(sz).join();
+
+    const ubyte[4] phobosResult = crc32Of(data);
 
     const uint zlibIRes = squiz_box.c.zlib.crc32(0, &data[0], sz);
     const ubyte[4] zlibResult = (cast(const(ubyte)*)&zlibIRes)[0 .. 4];
-    const ubyte[4] phobosResult = crc32Of(data);
-
-    assert(cast(ubyte[4])zlibResult == phobosResult);
+    assert(cast(ubyte[4]) zlibResult == phobosResult);
 
     void zlibRun()
     {
-        cast(void)squiz_box.c.zlib.crc32(0, &data[0], sz);
+        cast(void) squiz_box.c.zlib.crc32(0, &data[0], sz);
+    }
+
+    version (HaveSquizLzma)
+    {
+        import squiz_box.c.lzma;
+
+        const uint lzmaIRes = lzma_crc32(&data[0], sz, 0);
+        const ubyte[4] lzmaResult = (cast(const(ubyte)*)&lzmaIRes)[0 .. 4];
+
+        void lzmaRun()
+        {
+            cast(void)lzma_crc32(&data[0], sz, 0);
+        }
     }
 
     void phobosRun()
     {
-        cast(void)crc32Of(data);
+        cast(void) crc32Of(data);
     }
 
-    auto res = benchmark!(zlibRun, phobosRun)(100);
 
-    writefln!"zlib   crc32 took %s µs"(res[0].total!"usecs");
-    writefln!"phobos crc32 took %s µs"(res[1].total!"usecs");
+    version (HaveSquizLzma)
+    {
+        auto res = benchmark!(phobosRun, zlibRun, lzmaRun)(100);
+    }
+    else
+    {
+        auto res = benchmark!(phobosRun, zlibRun)(100);
+    }
+
+    writefln!"phobos crc32 took %s µs"(res[0].total!"usecs");
+    writefln!"zlib   crc32 took %s µs"(res[1].total!"usecs");
+    version (HaveSquizLzma)
+    {
+        writefln!"lzma   crc32 took %s µs"(res[2].total!"usecs");
+    }
 }
-
 
 /// Generate a unique name for temporary path (either dir or file)
 /// Params:
@@ -427,7 +450,7 @@ size_t binDiff(const(void)[] content1, const(void)[] content2)
         if (bytes2.length <= i)
             return i;
         if (bytes1[i] != bytes2[i])
-            return i;
+        return i;
     }
     if (bytes2.length > bytes1.length)
         return bytes1.length;
