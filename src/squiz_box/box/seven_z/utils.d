@@ -13,7 +13,7 @@ import std.typecons;
 
 auto trace7z(alias fun)(string func = __FUNCTION__)
 {
-    enum doTrace = true;
+    enum doTrace = false;
 
     static if (doTrace)
     {

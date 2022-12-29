@@ -453,9 +453,8 @@ unittest
     mkdir(dm.path);
 
     File(archive, "rb")
-        .read7zArchive()
-        ;
-        //.each!(e => e.extractTo(dm.path));
+        .unbox7z()
+        .each!(e => e.extractTo(dm.path));
 
-    // testExtractedFiles(dm, Yes.mode666);
+    testExtractedFiles(dm, Yes.mode666);
 }

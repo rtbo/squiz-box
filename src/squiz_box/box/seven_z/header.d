@@ -195,21 +195,29 @@ struct Header
             .join();
         assert(unpacked.length = unpackSize);
 
-        size_t pos = 0;
-        io.writefln!"Unpacked header:"();
-        io.writefln!"        %(%02x  %)"(iota(0, 16));
-        io.writeln();
-        while (pos < unpacked.length)
+        static if (false)
         {
-            const len = min(16, unpacked.length - pos);
-            io.writefln!"%04x    %(%02x  %)"(pos, unpacked[pos .. pos + len]);
-            pos += len;
+            size_t pos = 0;
+            io.writefln!"Unpacked header:"();
+            io.writefln!"        %(%02x  %)"(iota(0, 16));
+            io.writeln();
+            while (pos < unpacked.length)
+            {
+                const len = min(16, unpacked.length - pos);
+                io.writefln!"%04x    %(%02x  %)"(pos, unpacked[pos .. pos + len]);
+                pos += len;
+            }
+            io.writeln();
         }
-        io.writeln();
 
         auto hc = new ArrayCursor(unpacked, mainCursor.name);
         hc.enforceGetPropId(PropId.header);
         return readPlain(hc, mainCursor, packStartOffset);
+    }
+
+    @property size_t numFiles() const
+    {
+        return filesInfo.files.length;
     }
 }
 
@@ -287,6 +295,34 @@ struct StreamsInfo
     Crc32 folderUnpackCrc32(size_t f) const
     {
         return codersInfo.unpackCrcs.length ? codersInfo.unpackCrcs[f] : Crc32(0);
+    }
+
+    size_t folderSubstreams(size_t f) const
+    {
+        return subStreamsInfo.nums[f];
+    }
+
+    ulong folderSubstreamStart(size_t f, size_t s)
+    {
+        const s0 = subStreamsInfo.folderSizesStartIdx(f);
+
+        ulong start = 0;
+        foreach (ss; 0 .. s)
+            start += subStreamsInfo.sizes[s0 + ss];
+
+        return start;
+    }
+
+    ulong folderSubstreamSize(size_t f, size_t s)
+    {
+        const folderSize = codersInfo.unpackSizes[f];
+        const numStreams = subStreamsInfo.nums[f];
+        const s0 = subStreamsInfo.folderSizesStartIdx(f);
+
+        if (s == numStreams - 1) // last stream of folder
+            return folderSize - sum(subStreamsInfo.sizes[s0 .. s0 + s]);
+        else
+            return subStreamsInfo.sizes[s0 + s];
     }
 }
 
@@ -475,6 +511,14 @@ struct SubStreamsInfo
             // dfmt on
         }
     }
+
+    size_t folderSizesStartIdx(size_t f)
+    {
+        size_t idx = 0;
+        foreach (ff; 0 .. f)
+            idx += nums[ff] - 1;
+        return idx;
+    }
 }
 
 private enum long hnsecsFrom1601 = 504_911_232_000_000_000L;
@@ -530,7 +574,7 @@ struct FilesInfo
             const size = cursor.readUint64();
             const pos = cursor.pos;
             const nextPos = pos + size;
-            scope(success)
+            scope (success)
             {
                 if (cursor.pos > nextPos)
                     bad7z(cursor.name, format!"Inconsistent file properties: %s"(propId));
@@ -545,7 +589,7 @@ struct FilesInfo
             case PropId.emptyStream:
                 auto emptyStreams = cursor.readBitField(numFiles);
                 numEmptyStreams = emptyStreams.count;
-                foreach(i, es; emptyStreams)
+                foreach (i, es; emptyStreams)
                     res.files[i].emptyStream = es;
                 break;
             case PropId.emptyFile:
@@ -598,7 +642,7 @@ struct FilesInfo
                 foreach (i, ref f; res.files)
                 {
                     if (!defined[i])
-                        continue;
+                    continue;
                     const data = cursor.getValue!long();
                     if (data >= long.max - hnsecsFrom1601)
                         bad7z(cursor.name, "Inconsistent file timestamp");
@@ -612,7 +656,7 @@ struct FilesInfo
                 foreach (i, ref f; res.files)
                 {
                     if (!defined[i])
-                        continue;
+                    continue;
 
                     f.attributes = cursor.getValue!uint();
                 }
