@@ -346,63 +346,63 @@ private struct RandomDataGen
 
 static assert(isByteRange!RandomDataGen);
 
-@("bench CRC32")
-unittest
-{
-    import squiz_box.c.zlib;
-    import std.digest.crc : crc32Of;
-    import std.datetime.stopwatch : benchmark;
-    import std.stdio : writefln;
+// @("bench CRC32")
+// unittest
+// {
+//     import squiz_box.c.zlib;
+//     import std.digest.crc : crc32Of;
+//     import std.datetime.stopwatch : benchmark;
+//     import std.stdio : writefln;
 
-    const sz = 1024 * 1024;
-    const ubyte[] data = generateRandomData(sz).join();
+//     const sz = 1024 * 1024;
+//     const ubyte[] data = generateRandomData(sz).join();
 
-    const ubyte[4] phobosResult = crc32Of(data);
+//     const ubyte[4] phobosResult = crc32Of(data);
 
-    const uint zlibIRes = squiz_box.c.zlib.crc32(0, &data[0], sz);
-    const ubyte[4] zlibResult = (cast(const(ubyte)*)&zlibIRes)[0 .. 4];
-    assert(cast(ubyte[4]) zlibResult == phobosResult);
+//     const uint zlibIRes = squiz_box.c.zlib.crc32(0, &data[0], sz);
+//     const ubyte[4] zlibResult = (cast(const(ubyte)*)&zlibIRes)[0 .. 4];
+//     assert(cast(ubyte[4]) zlibResult == phobosResult);
 
-    void zlibRun()
-    {
-        cast(void) squiz_box.c.zlib.crc32(0, &data[0], sz);
-    }
+//     void zlibRun()
+//     {
+//         cast(void) squiz_box.c.zlib.crc32(0, &data[0], sz);
+//     }
 
-    version (HaveSquizLzma)
-    {
-        import squiz_box.c.lzma;
+//     version (HaveSquizLzma)
+//     {
+//         import squiz_box.c.lzma;
 
-        const uint lzmaIRes = lzma_crc32(&data[0], sz, 0);
-        const ubyte[4] lzmaResult = (cast(const(ubyte)*)&lzmaIRes)[0 .. 4];
+//         const uint lzmaIRes = lzma_crc32(&data[0], sz, 0);
+//         const ubyte[4] lzmaResult = (cast(const(ubyte)*)&lzmaIRes)[0 .. 4];
 
-        void lzmaRun()
-        {
-            cast(void)lzma_crc32(&data[0], sz, 0);
-        }
-    }
+//         void lzmaRun()
+//         {
+//             cast(void)lzma_crc32(&data[0], sz, 0);
+//         }
+//     }
 
-    void phobosRun()
-    {
-        cast(void) crc32Of(data);
-    }
+//     void phobosRun()
+//     {
+//         cast(void) crc32Of(data);
+//     }
 
 
-    version (HaveSquizLzma)
-    {
-        auto res = benchmark!(phobosRun, zlibRun, lzmaRun)(100);
-    }
-    else
-    {
-        auto res = benchmark!(phobosRun, zlibRun)(100);
-    }
+//     version (HaveSquizLzma)
+//     {
+//         auto res = benchmark!(phobosRun, zlibRun, lzmaRun)(100);
+//     }
+//     else
+//     {
+//         auto res = benchmark!(phobosRun, zlibRun)(100);
+//     }
 
-    writefln!"phobos crc32 took %s µs"(res[0].total!"usecs");
-    writefln!"zlib   crc32 took %s µs"(res[1].total!"usecs");
-    version (HaveSquizLzma)
-    {
-        writefln!"lzma   crc32 took %s µs"(res[2].total!"usecs");
-    }
-}
+//     writefln!"phobos crc32 took %s µs"(res[0].total!"usecs");
+//     writefln!"zlib   crc32 took %s µs"(res[1].total!"usecs");
+//     version (HaveSquizLzma)
+//     {
+//         writefln!"lzma   crc32 took %s µs"(res[2].total!"usecs");
+//     }
+// }
 
 /// Generate a unique name for temporary path (either dir or file)
 /// Params:
