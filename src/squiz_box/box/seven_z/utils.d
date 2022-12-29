@@ -279,16 +279,10 @@ unittest
         0x2727_2727_2727_2727));
 }
 
-BitArray readBooleanList(C)(C cursor, size_t count, Flag!"checkAllDefined" checkAll)
+BitArray readBitField(C)(C cursor, size_t count)
 {
     BitArray res;
     res.length = count;
-
-    if (checkAll && cursor.get != 0)
-    {
-        res.flip();
-        return res;
-    }
 
     ubyte b;
     ubyte mask;
@@ -303,4 +297,19 @@ BitArray readBooleanList(C)(C cursor, size_t count, Flag!"checkAllDefined" check
         mask >>= 1;
     }
     return res;
+}
+
+BitArray readBooleanList(C)(C cursor, size_t count)
+{
+    // check all-defined in a single bool
+    if (cursor.get != 0)
+    {
+        BitArray res;
+        res.length = count;
+        res.flip();
+        return res;
+    }
+
+    // otherwise it is a bitfield
+    return cursor.readBitField(count);
 }

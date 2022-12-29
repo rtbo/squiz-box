@@ -9,6 +9,7 @@ import squiz_box.squiz;
 
 import std.algorithm;
 import std.array;
+import std.bitmanip;
 import std.conv;
 import std.exception;
 import std.format;
@@ -143,6 +144,7 @@ struct SignatureHeader
 struct Header
 {
     StreamsInfo streamsInfo;
+    FilesInfo filesInfo;
 
     static Header read(HC, C)(HC headerCursor, C mainCursor, ulong packStartOffset)
     {
@@ -162,6 +164,18 @@ struct Header
         Header res;
         headerCursor.enforceGetPropId(PropId.mainStreamsInfo);
         res.streamsInfo = trace7z!(() => StreamsInfo.read(headerCursor));
+
+        auto nextId = headerCursor.readPropId();
+        if (nextId == PropId.filesInfo)
+        {
+            res.filesInfo = trace7z!(() => FilesInfo.read(headerCursor));
+
+            nextId = headerCursor.readPropId();
+        }
+
+        if (nextId != PropId.end)
+            bad7z(headerCursor.name, "Expected end property id");
+
         return res;
     }
 
@@ -226,7 +240,7 @@ struct StreamsInfo
             }
         });
 
-        if(res.numStreams != res.numFolders)
+        if (res.numStreams != res.numFolders)
             unsupported7z(cursor.name, "Only single stream folders are supported");
 
         return res;
@@ -240,7 +254,7 @@ struct StreamsInfo
     ulong streamPackStart(size_t s) const
     {
         ulong start = packInfo.packStart;
-        foreach(ss; 0 .. s)
+        foreach (ss; 0 .. s)
             start += packInfo.packSizes[ss];
         return start;
     }
@@ -289,7 +303,6 @@ struct PackInfo
 
         const numStreams = cursor.readUint32();
 
-        // dfmt off
         cursor.whileNotEndPropId!((PropId propId) {
             switch (propId)
             {
@@ -299,19 +312,20 @@ struct PackInfo
                     .array;
                 break;
             case PropId.crc:
-                auto defined = cursor.readBooleanList(numStreams, Yes.checkAllDefined);
+                auto defined = cursor.readBooleanList(numStreams);
                 res.packCrcs = new Crc32[numStreams];
                 foreach (i; 0 .. numStreams)
                 {
+                    // dfmt off
                     if (defined[i])
                         res.packCrcs[i] = cursor.readCrc32();
+                    // dfmt on
                 }
                 break;
             default:
                 unexpectedPropId(cursor.name, propId);
             }
         });
-        // dfmt on
 
         return res;
     }
@@ -336,7 +350,6 @@ struct CodersInfo
             .take(numFolders)
             .array;
 
-        // dfmt off
         cursor.whileNotEndPropId!((PropId propId) {
             switch (propId)
             {
@@ -347,18 +360,19 @@ struct CodersInfo
                 break;
             case PropId.crc:
                 res.unpackCrcs = new Crc32[numFolders];
-                auto defined = cursor.readBooleanList(numFolders, Yes.checkAllDefined);
+                auto defined = cursor.readBooleanList(numFolders);
                 foreach (i; 0 .. numFolders)
                 {
+                    // dfmt off
                     if (defined[i])
                         res.unpackCrcs[i] = cursor.readCrc32();
+                    // dfmt on
                 }
                 break;
             default:
                 unexpectedPropId(cursor.name, propId);
             }
         });
-        // dfmt on
         return res;
     }
 }
@@ -388,6 +402,227 @@ struct FolderInfo
 
         auto algos = coderInfos.map!(ci => ci.buildUnpackSingleAlgo()).array;
         return squizCompoundAlgo(algos);
+    }
+}
+
+struct SubStreamsInfo
+{
+
+    uint[] nums; // one entry per folder
+    ulong[] sizes; // one entry per substream except for last folder substream
+    Crc32[] crcs; // one entry per undefined Crc in parent StreamsInfo
+
+    static SubStreamsInfo read(C)(C cursor, const ref StreamsInfo streamsInfo)
+    {
+        SubStreamsInfo res;
+
+        cursor.whileNotEndPropId!((PropId propId) {
+            switch (propId)
+            {
+            case PropId.numUnpackStream:
+                res.nums = hatch!(() => cursor.readUint32())
+                    .take(streamsInfo.numFolders)
+                    .array;
+                break;
+            case PropId.size:
+                res.readSizes(cursor, streamsInfo);
+                break;
+            case PropId.crc:
+                res.readCrcs(cursor, streamsInfo);
+                break;
+            default:
+                unexpectedPropId(cursor.name, propId);
+            }
+        });
+
+        return res;
+    }
+
+    void readSizes(C)(C cursor, const ref StreamsInfo streamsInfo)
+    {
+        if (this.nums.length)
+        {
+            foreach (f; 0 .. streamsInfo.numFolders)
+            {
+                foreach (s; 0 .. this.nums[f] - 1)
+                {
+                    const size = cursor.readUint64();
+                    this.sizes ~= size;
+                }
+            }
+        }
+    }
+
+    void readCrcs(C)(C cursor, const ref StreamsInfo streamsInfo)
+    {
+        const numFolders = streamsInfo.numFolders;
+        size_t numCrcs = 0;
+        // count number of undefined CRCs
+        foreach (f; 0 .. numFolders)
+        {
+            const num = this.nums.length ? this.nums[f] : 1;
+            if (num == 1 && !streamsInfo.folderUnpackCrc32(f))
+                numCrcs += 1;
+            else if (num > 1)
+                numCrcs += num;
+        }
+        const defined = cursor.readBooleanList(numCrcs);
+        foreach (i; 0 .. numCrcs)
+        {
+            // dfmt off
+            if (defined[i])
+                this.crcs ~= cursor.readCrc32();
+            // dfmt on
+        }
+    }
+}
+
+private enum long hnsecsFrom1601 = 504_911_232_000_000_000L;
+
+struct FileInfo
+{
+    string name;
+    long ctime;
+    long atime;
+    long mtime;
+
+    uint attributes;
+
+    bool emptyStream;
+    bool emptyFile;
+    bool antiFile;
+
+    void setTime(PropId typ, long tim)
+    {
+        const stdTime = tim + hnsecsFrom1601;
+        switch (typ)
+        {
+        case PropId.ctime:
+            ctime = stdTime;
+            break;
+        case PropId.atime:
+            atime = stdTime;
+            break;
+        case PropId.mtime:
+            mtime = stdTime;
+            break;
+        default:
+            assert(false);
+        }
+    }
+}
+
+struct FilesInfo
+{
+    FileInfo[] files;
+
+    size_t dummyBytes;
+
+    static FilesInfo read(C)(C cursor)
+    {
+        FilesInfo res;
+
+        const numFiles = cursor.readUint32();
+        res.files = new FileInfo[numFiles];
+        size_t numEmptyStreams = 0;
+
+        cursor.whileNotEndPropId!((PropId propId) {
+            const size = cursor.readUint64();
+            const pos = cursor.pos;
+            const nextPos = pos + size;
+            scope(success)
+            {
+                if (cursor.pos > nextPos)
+                    bad7z(cursor.name, format!"Inconsistent file properties: %s"(propId));
+                cursor.seek(nextPos);
+            }
+
+            switch (propId)
+            {
+            case PropId.dummy:
+                res.dummyBytes = size;
+                break;
+            case PropId.emptyStream:
+                auto emptyStreams = cursor.readBitField(numFiles);
+                numEmptyStreams = emptyStreams.count;
+                foreach(i, es; emptyStreams)
+                    res.files[i].emptyStream = es;
+                break;
+            case PropId.emptyFile:
+                auto emptyFiles = cursor.readBitField(numEmptyStreams);
+                size_t i;
+                foreach (ref f; res.files)
+                {
+                    if (f.emptyStream)
+                        f.emptyFile = emptyFiles[i++];
+                }
+                break;
+            case PropId.anti:
+                auto antiFiles = cursor.readBitField(numEmptyStreams);
+                size_t i;
+                foreach (ref f; res.files)
+                {
+                    if (f.emptyStream)
+                        f.antiFile = antiFiles[i++];
+                }
+                break;
+            case PropId.names:
+                //const defined = cursor.readBooleanList(numFiles);
+                const external = !!cursor.get;
+                if (external)
+                    unsupported7z(cursor.name, "Out-of-band file name");
+                foreach (i, ref f; res.files)
+                {
+                    import std.encoding : transcode;
+
+                    // if (!defined[i])
+                    //     continue;
+
+                    wstring wname;
+                    wchar c = cursor.getValue!wchar();
+                    while (c != 0)
+                    {
+                        wname ~= c;
+                        c = cursor.getValue!wchar();
+                    }
+                    transcode(wname, f.name);
+                }
+                break;
+            case PropId.mtime:
+            case PropId.atime:
+            case PropId.ctime:
+                const defined = cursor.readBooleanList(numFiles);
+                const external = !!cursor.get;
+                if (external)
+                    unsupported7z(cursor.name, "Out-of-band file timestamp");
+                foreach (i, ref f; res.files)
+                {
+                    if (!defined[i])
+                        continue;
+                    const data = cursor.getValue!long();
+                    if (data >= long.max - hnsecsFrom1601)
+                        bad7z(cursor.name, "Inconsistent file timestamp");
+                }
+                break;
+            case PropId.attributes:
+                const defined = cursor.readBooleanList(numFiles);
+                const external = !!cursor.get;
+                if (external)
+                    unsupported7z(cursor.name, "Out-of-band file timestamp");
+                foreach (i, ref f; res.files)
+                {
+                    if (!defined[i])
+                        continue;
+
+                    f.attributes = cursor.getValue!uint();
+                }
+                break;
+            default:
+                unexpectedPropId(cursor.name, propId);
+            }
+        });
+
+        return res;
     }
 }
 
@@ -606,76 +841,6 @@ struct CoderInfo
         case CoderId.lizard:
         case CoderId.aes:
             throw new Exception(format!"Unsupported coder id: %s"(this.id));
-        }
-    }
-}
-
-struct SubStreamsInfo
-{
-
-    uint[] nums; // one entry per folder
-    ulong[] sizes; // one entry per substream except for last folder substream
-    Crc32[] crcs; // one entry per undefined Crc in parent StreamsInfo
-
-    static SubStreamsInfo read(C)(C cursor, const ref StreamsInfo streamsInfo)
-    {
-        SubStreamsInfo res;
-
-        cursor.whileNotEndPropId!((PropId propId) {
-            switch (propId)
-            {
-            case PropId.numUnpackStream:
-                res.nums = hatch!(() => cursor.readUint32())
-                    .take(streamsInfo.numFolders)
-                    .array;
-                break;
-            case PropId.size:
-                res.readSizes(cursor, streamsInfo);
-                break;
-            case PropId.crc:
-                res.readCrcs(cursor, streamsInfo);
-                break;
-            default:
-                unexpectedPropId(cursor.name, propId);
-            }
-        });
-
-        return res;
-    }
-
-    void readSizes(C)(C cursor, const ref StreamsInfo streamsInfo)
-    {
-        if (this.nums.length)
-        {
-            foreach (f; 0 .. streamsInfo.numFolders)
-            {
-                foreach (s; 0 .. this.nums[f] - 1)
-                {
-                    const size = cursor.readUint64();
-                    this.sizes ~= size;
-                }
-            }
-        }
-    }
-
-    void readCrcs(C)(C cursor, const ref StreamsInfo streamsInfo)
-    {
-        const numFolders = streamsInfo.numFolders;
-        size_t numCrcs = 0;
-        // count number of undefined CRCs
-        foreach (f; 0 .. numFolders)
-        {
-            const num = this.nums.length ? this.nums[f] : 1;
-            if (num == 1 && !streamsInfo.folderUnpackCrc32(f))
-                numCrcs += 1;
-            else if (num > 1)
-                numCrcs += num;
-        }
-        const defined = cursor.readBooleanList(numCrcs, Yes.checkAllDefined);
-        foreach (i; 0 .. numCrcs)
-        {
-            if (defined[i])
-            this.crcs ~= cursor.readCrc32();
         }
     }
 }
