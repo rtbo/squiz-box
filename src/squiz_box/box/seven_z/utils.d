@@ -100,61 +100,7 @@ const(ubyte)[] readArray(C)(C cursor, size_t len, string msg = null)
     return res;
 }
 
-uint readUint32(C)(C cursor)
-{
-    static immutable ubyte[] lenb = [
-        0b0111_1111,
-        0b1011_1111,
-        0b1101_1111,
-        0b1110_1111,
-        0b1111_0111,
-        0b1111_1011,
-        0b1111_1101,
-        0b1111_1110,
-        0b1111_1111,
-    ];
-    const b0 = cursor.get;
-    if (b0 <= lenb[0])
-    return b0;
-
-    uint mask = 0xc0;
-    uint len = 1;
-
-    foreach (b; lenb[1 .. $])
-    {
-        if (b0 <= b)
-            break;
-        len++;
-        mask |= mask >> 1;
-    }
-
-    enforce(len <= 3, "Number cannot be represented in 32 bits");
-
-    const uint masked = b0 & ~mask;
-
-    LittleEndian!4 bn;
-    enforce(cursor.read(bn.data[0 .. len]).length == len, "Not enough bytes");
-
-    return bn.val | ((b0 & masked) << (len * 8));
-}
-
-@("readUint32")
-unittest
-{
-    uint read(ubyte[] pattern)
-    {
-        auto cursor = new ArrayCursor(pattern);
-        return readUint32(cursor);
-    }
-
-    assert(read([0x27, 0x27, 0x27, 0x27, 0x27]) == 0x27);
-    assert(read([0xa7, 0x27, 0x27, 0x27, 0x27]) == 0x2727);
-    assert(read([0xc7, 0x27, 0x27, 0x27, 0x27]) == 0x07_2727);
-    assert(read([0xe7, 0x27, 0x27, 0x27, 0x27]) == 0x0727_2727);
-    assertThrown(read([0xf7, 0x27, 0x27, 0x27, 0x27]));
-}
-
-ulong readUint64(C)(C cursor)
+ulong readNumber(C)(C cursor)
 {
     static immutable ubyte[] lenb = [
         0b0111_1111,
@@ -194,13 +140,13 @@ ulong readUint64(C)(C cursor)
 
 }
 
-@("readUint64")
+@("readNumber")
 unittest
 {
     ulong read(ubyte[] pattern)
     {
         auto cursor = new ArrayCursor(pattern);
-        return readUint64(cursor);
+        return readNumber(cursor);
     }
 
     assert(read([0x27, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27]) == 0x27);
@@ -214,7 +160,7 @@ unittest
     assert(read([0xff, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27, 0x27]) == 0x2727_2727_2727_2727);
 }
 
-void writeUint64(WC)(WC cursor, ulong number)
+void writeNumber(WC)(WC cursor, ulong number)
 {
     static immutable ulong[] lenn = [
         0x7f,
@@ -257,13 +203,13 @@ void writeUint64(WC)(WC cursor, ulong number)
     cursor.write(le.data[0 .. len]);
 }
 
-@("writeUint64")
+@("writeNumber")
 unittest
 {
     const(ubyte)[] write(ulong number)
     {
         auto cursor = new ArrayWriteCursor();
-        writeUint64(cursor, number);
+        writeNumber(cursor, number);
         return cursor.data;
     }
 

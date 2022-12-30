@@ -335,15 +335,15 @@ struct PackInfo
     static PackInfo read(C)(C cursor)
     {
         PackInfo res;
-        res.packStart = cursor.readUint64();
+        res.packStart = cursor.readNumber();
 
-        const numStreams = cursor.readUint32();
+        const numStreams = cast(size_t)cursor.readNumber();
 
         cursor.whileNotEndPropId!((PropId propId) {
             switch (propId)
             {
             case PropId.size:
-                res.packSizes = hatch!(() => cursor.readUint64())
+                res.packSizes = hatch!(() => cursor.readNumber())
                     .take(numStreams)
                     .array;
                 break;
@@ -376,7 +376,7 @@ struct CodersInfo
     static CodersInfo read(C)(C cursor)
     {
         cursor.enforceGetPropId(PropId.folder);
-        const numFolders = cursor.readUint32();
+        const numFolders = cast(size_t)cursor.readNumber();
         const bool ext = cursor.get != 0;
         if (ext)
             unsupported7z(cursor.source, "Unsupported out-of-band folder definition");
@@ -390,7 +390,7 @@ struct CodersInfo
             switch (propId)
             {
             case PropId.codersUnpackSize:
-                res.unpackSizes = hatch!(() => cursor.readUint64())
+                res.unpackSizes = hatch!(() => cursor.readNumber())
                     .take(numFolders)
                     .array;
                 break;
@@ -419,7 +419,7 @@ struct FolderInfo
 
     static FolderInfo read(C)(C cursor)
     {
-        const numCoders = cursor.readUint32();
+        const numCoders = cast(size_t)cursor.readNumber();
 
         return FolderInfo(
             hatch!(() => trace7z!(() => CoderInfo.read(cursor)))
@@ -443,8 +443,7 @@ struct FolderInfo
 
 struct SubStreamsInfo
 {
-
-    uint[] nums; // one entry per folder
+    size_t[] nums; // one entry per folder
     ulong[] sizes; // one entry per substream except for last folder substream
     Crc32[] crcs; // one entry per undefined Crc in parent StreamsInfo
 
@@ -456,7 +455,7 @@ struct SubStreamsInfo
             switch (propId)
             {
             case PropId.numUnpackStream:
-                res.nums = hatch!(() => cursor.readUint32())
+                res.nums = hatch!(() => cast(size_t)cursor.readNumber())
                     .take(streamsInfo.numFolders)
                     .array;
                 break;
@@ -482,7 +481,7 @@ struct SubStreamsInfo
             {
                 foreach (s; 0 .. this.nums[f] - 1)
                 {
-                    const size = cursor.readUint64();
+                    const size = cursor.readNumber();
                     this.sizes ~= size;
                 }
             }
@@ -566,12 +565,12 @@ struct FilesInfo
     {
         FilesInfo res;
 
-        const numFiles = cursor.readUint32();
+        const numFiles = cast(size_t)cursor.readNumber();
         res.files = new FileInfo[numFiles];
         size_t numEmptyStreams = 0;
 
         cursor.whileNotEndPropId!((PropId propId) {
-            const size = cursor.readUint64();
+            const size = cursor.readNumber();
             const pos = cursor.pos;
             const nextPos = pos + size;
             scope (success)
@@ -750,7 +749,7 @@ struct CoderInfo
         ubyte[] coderProps;
         if (flags.thereAreAttributes)
         {
-            const size = readUint32(cursor);
+            const size = cast(size_t)readNumber(cursor);
             coderProps = new ubyte[size];
             cursor.read(coderProps);
         }
