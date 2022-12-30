@@ -476,13 +476,16 @@ auto squiz(I, A)(I input, A algo, ubyte[] chunkBuffer)
 /// To the difference of `squiz`, `squizReuse` will not manage the state (aka stream) of the algorithm,
 /// which allows to reuse it (and its allocated resources) for several jobs.
 /// squizReuse will drive the algorithm and move the stream forward until processing is over.
-/// The stream must be either freshly initialized or freshly reset before being passed
-/// to this function.
-auto squizReuse(I, A, S)(I input, A algo, S stream, ubyte[] chunkBuffer)
+/// When the output stream must be finished, pass Yes.lastInput.
+/// squizReuse is useful in two situations:
+///  - concat several data sources to the same stream
+///  - reuse allocated resources. In that case, if concat is not required,
+///    algo.reset must be called between each call of squizReuse.
+auto squizReuse(I, A, S)(I input, A algo, S stream, Flag!"lastInput" lastInput, ubyte[] chunkBuffer)
         if (isByteRange!I && isSquizAlgo!A)
 {
     static assert(is(StreamType!A == S), S.strinof ~ " is not the stream produced by " ~ A.stringof);
-    return Squiz!(I, A, No.endStream)(input, algo, stream, chunkBuffer, ulong.max);
+    return Squiz!(I, A, No.endStream)(input, algo, stream, chunkBuffer, ulong.max, lastInput);
 }
 
 /// Same as squiz, but will stop encoding/decoding after len bytes has been written out
@@ -523,16 +526,21 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
     // maximum number of bytes to write out
     private ulong maxLen;
 
+    // whether the stream must be concluded
+    Flag!"lastInput" lastInput;
+
     /// Whether the end of stream was reported by the Policy
     private bool ended;
 
-    private this(I input, A algo, Stream stream, ubyte[] chunkBuffer, ulong maxLen)
+    private this(I input, A algo, Stream stream, ubyte[] chunkBuffer, ulong maxLen,
+    Flag!"lastInput" lastInput = Yes.lastInput)
     {
         this.input = input;
         this.algo = algo;
         this.stream = stream;
         this.chunkBuffer = chunkBuffer;
         this.maxLen = maxLen;
+        this.lastInput = lastInput;
         prime();
     }
 
@@ -565,7 +573,7 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
             const len = min(chunkBuffer.length - chunk.length, maxLen);
             stream.output = chunkBuffer[chunk.length .. chunk.length + len];
 
-            const streamEnded = algo.process(stream, cast(Flag!"lastChunk") input.empty);
+            const streamEnded = algo.process(stream, cast(Flag!"lastChunk") (input.empty && lastInput));
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
             maxLen -= len;
@@ -573,6 +581,13 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
             // popFront must be called at the end because it invalidates inChunk
             if (stream.input.length == 0 && !input.empty)
                 input.popFront();
+
+            if (stream.input.length == 0 && !lastInput)
+            {
+                // more input will come, we can leave here for the next round.
+                ended = true;
+                break;
+            }
 
             if (streamEnded || maxLen == 0)
             {

@@ -72,13 +72,13 @@ unittest
     auto buffer = new ubyte[defaultChunkSize];
 
     generateSequentialData(len, 1239, 13, 8192)
-        .squizReuse(algo, state, buffer)
+        .squizReuse(algo, state, Yes.lastInput, buffer)
         .writeBinaryFile(dataGz.path);
 
     algo.reset(state);
 
     generateSequentialData(len, 1239, 13, 8192)
-        .squizReuse(algo, state, buffer)
+        .squizReuse(algo, state, Yes.lastInput, buffer)
         .writeBinaryFile(dataGz.path);
 
     algo.end(state);
