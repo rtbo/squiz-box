@@ -215,6 +215,17 @@ struct Header
             .join();
         assert(unpacked.length = unpackSize);
 
+        static if (false)
+        {
+            import squiz_box.util : hexDump;
+            import std.range : only;
+
+            io.writeln();
+            io.writefln!"Unpacked header:";
+            only(unpacked).hexDump(io.stdout.lockingTextWriter);
+            io.writeln();
+        }
+
         auto hc = new ArrayCursor(unpacked, mainCursor.source);
         hc.enforceGetPropId(PropId.header);
         return readPlain(hc, mainCursor, packStartOffset);
