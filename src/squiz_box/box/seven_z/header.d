@@ -1028,27 +1028,34 @@ struct CoderFlags
 // dfmt off
 enum CoderId : uint
 {
-    copy        = 0x00,
-    delta       = 0x03,
-    bcjX86      = 0x04,
-    lzma2       = 0x21,
-    lzma1       = 0x030101,
-    bzip2       = 0x040202,
-    deflate     = 0x040108,
-    deflate64   = 0x040109,
-    p7zBcj      = 0x03030103,
-    p7ZBcj2     = 0x0303011b,
-    bcjPowerPc  = 0x03030205,
-    bcjIa64     = 0x03030301,
-    bcjArm      = 0x03030501,
-    bcjArmThumb = 0x03030701,
-    bcjSparc    = 0x03030805,
-    zstd        = 0x04f71101,
-    brotli      = 0x04f71102,
-    lz4         = 0x04f71104,
-    lzs         = 0x04f71105,
-    lizard      = 0x04f71106,
-    aes         = 0x06f10701,
+    copy            = 0x00,
+    delta           = 0x03,
+    bcjX86          = 0x04,
+    bcjPowerPc      = 0x05,
+    bcjIa64         = 0x06,
+    bcjArm          = 0x07,
+    bcjArmThumb     = 0x08,
+    bcjSparc        = 0x09,
+    lzma2           = 0x21,
+    swap2           = 0x020302,
+    swap4           = 0x020304,
+    lzma1           = 0x030101,
+    bzip2           = 0x040202,
+    deflate         = 0x040108,
+    deflate64       = 0x040109,
+    p7zBcj          = 0x03030103,
+    p7zBcj2         = 0x0303011b,
+    p7zBcjPowerPc   = 0x03030205,
+    p7zBcjIa64      = 0x03030301,
+    p7zBcjArm       = 0x03030501,
+    p7zBcjArmThumb  = 0x03030701,
+    p7zBcjSparc     = 0x03030805,
+    zstd            = 0x04f71101,
+    brotli          = 0x04f71102,
+    lz4             = 0x04f71104,
+    lzs             = 0x04f71105,
+    lizard          = 0x04f71106,
+    aes             = 0x06f10701,
 }
 // dfmt on
 
@@ -1082,6 +1089,12 @@ struct CoderInfo
         ubyte[4] idBuf;
         ubyte[] idSlice = idBuf[0 .. flags.idSize];
         cursor.read(idSlice);
+        uint coderId = idSlice[0];
+        foreach (idB; idSlice[1 .. $])
+        {
+            coderId <<= 8;
+            coderId |= idB;
+        }
 
         ubyte[] coderProps;
         if (flags.thereAreAttributes)
@@ -1089,13 +1102,6 @@ struct CoderInfo
             const size = cast(size_t) readNumber(cursor);
             coderProps = new ubyte[size];
             cursor.read(coderProps);
-        }
-
-        uint coderId = idSlice[0];
-        foreach (idB; idSlice[1 .. $])
-        {
-            coderId <<= 8;
-            coderId |= idB;
         }
 
         return CoderInfo(cast(CoderId) coderId, coderProps);
@@ -1134,15 +1140,21 @@ struct CoderInfo
     {
         switch (this.id)
         {
-        case CoderId.delta:
-        case CoderId.bcjX86:
         case CoderId.lzma2:
         case CoderId.lzma1:
+        case CoderId.delta:
+        case CoderId.bcjX86:
         case CoderId.bcjPowerPc:
         case CoderId.bcjIa64:
         case CoderId.bcjArm:
         case CoderId.bcjArmThumb:
         case CoderId.bcjSparc:
+        case CoderId.p7zBcj:
+        case CoderId.p7zBcjPowerPc:
+        case CoderId.p7zBcjIa64:
+        case CoderId.p7zBcjArm:
+        case CoderId.p7zBcjArmThumb:
+        case CoderId.p7zBcjSparc:
             return true;
         default:
             return false;
@@ -1153,23 +1165,29 @@ struct CoderInfo
     {
         switch (this.id)
         {
-        case CoderId.delta:
-            return LzmaRawFilter.delta(this.props).into;
-        case CoderId.bcjX86:
-            return LzmaRawFilter.bcjX86(this.props).into;
         case CoderId.lzma2:
             return LzmaRawFilter.lzma2(this.props).into;
         case CoderId.lzma1:
             return LzmaRawFilter.lzma1(this.props).into;
+        case CoderId.delta:
+            return LzmaRawFilter.delta(this.props).into;
+        case CoderId.bcjX86:
+        case CoderId.p7zBcj:
+            return LzmaRawFilter.bcjX86(this.props).into;
         case CoderId.bcjPowerPc:
+        case CoderId.p7zBcjPowerPc:
             return LzmaRawFilter.bcjPowerPc(this.props).into;
         case CoderId.bcjIa64:
+        case CoderId.p7zBcjIa64:
             return LzmaRawFilter.bcjIa64(this.props).into;
         case CoderId.bcjArm:
+        case CoderId.p7zBcjArm:
             return LzmaRawFilter.bcjArm(this.props).into;
         case CoderId.bcjArmThumb:
+        case CoderId.p7zBcjArmThumb:
             return LzmaRawFilter.bcjArmThumb(this.props).into;
         case CoderId.bcjSparc:
+        case CoderId.p7zBcjSparc:
             return LzmaRawFilter.bcjSparc(this.props).into;
         default:
             assert(false);
@@ -1182,18 +1200,10 @@ struct CoderInfo
     /// in a LZMA filter chain (e.g. deflate, aes, ...)
     SquizAlgo buildUnpackSingleAlgo() const
     {
-        final switch (this.id)
+        switch (this.id)
         {
         case CoderId.copy:
             return squizAlgo(Copy());
-        case CoderId.delta:
-            return squizAlgo(DecompressLzma(
-                    [LzmaRawFilter.delta(this.props).into],
-            ));
-        case CoderId.bcjX86:
-            return squizAlgo(DecompressLzma(
-                    [LzmaRawFilter.bcjX86(this.props).into],
-            ));
         case CoderId.lzma2:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.lzma2(this.props).into],
@@ -1202,23 +1212,37 @@ struct CoderInfo
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.lzma1(this.props).into],
             ));
+        case CoderId.delta:
+            return squizAlgo(DecompressLzma(
+                    [LzmaRawFilter.delta(this.props).into],
+            ));
+        case CoderId.bcjX86:
+        case CoderId.p7zBcj:
+            return squizAlgo(DecompressLzma(
+                    [LzmaRawFilter.bcjX86(this.props).into],
+            ));
         case CoderId.bcjPowerPc:
+        case CoderId.p7zBcjPowerPc:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.bcjPowerPc(this.props).into],
             ));
         case CoderId.bcjIa64:
+        case CoderId.p7zBcjIa64:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.bcjIa64(this.props).into],
             ));
         case CoderId.bcjArm:
+        case CoderId.p7zBcjArm:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.bcjArm(this.props).into],
             ));
         case CoderId.bcjArmThumb:
+        case CoderId.p7zBcjArmThumb:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.bcjArmThumb(this.props).into],
             ));
         case CoderId.bcjSparc:
+        case CoderId.p7zBcjSparc:
             return squizAlgo(DecompressLzma(
                     [LzmaRawFilter.bcjSparc(this.props).into],
             ));
@@ -1242,14 +1266,7 @@ struct CoderInfo
             {
                 continue;
             }
-        case CoderId.deflate64:
-        case CoderId.p7zBcj:
-        case CoderId.p7ZBcj2:
-        case CoderId.brotli:
-        case CoderId.lz4:
-        case CoderId.lzs:
-        case CoderId.lizard:
-        case CoderId.aes:
+        default:
             throw new Exception(format!"Unsupported coder id: %s"(this.id));
         }
     }
