@@ -6,6 +6,7 @@ import squiz_box;
 import std.typecons;
 import std.digest;
 import std.digest.sha;
+import io = std.stdio;
 
 string[] filesForArchive()
 {
@@ -88,6 +89,59 @@ void testZipArchiveContent(string archivePath)
     {
         const fileShell = escapeShellFileName(filename);
         return executeShell("unzip -p " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+    }
+
+    res = sha1sumFile("file1.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
+
+    res = sha1sumFile("file 2.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
+
+    res = sha1sumFile("folder/chmod 666.txt");
+    assert(res.status == 0);
+    assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+}
+
+void test7zArchiveContent(string archivePath)
+{
+    import std.algorithm : canFind;
+    import std.process : execute, executeShell, escapeShellFileName;
+    import std.regex : matchFirst;
+    import std.string : splitLines;
+
+    const line1 = `\s*3521\s.+file 2.txt$`;
+    const line2 = `\s*7\s.+file1.txt$`;
+    const line3 = `\s*26\s.+folder/chmod 666.txt$`;
+
+    auto res = execute(["7z", "l", "-slt", archivePath]);
+    debug
+    {
+        import std.stdio : writeln;
+
+        try
+        {
+            writeln("exit with code ", res.status);
+            writeln(res.output);
+        }
+        catch (Exception)
+        {
+        }
+    }
+    assert(res.status == 0);
+    const lines = res.output.splitLines();
+    assert(lines.length == 8);
+    assert(matchFirst(lines[3], line1));
+    assert(matchFirst(lines[4], line2));
+    assert(matchFirst(lines[5], line3));
+
+    const archiveShell = escapeShellFileName(archivePath);
+
+    auto sha1sumFile(string filename)
+    {
+        const fileShell = escapeShellFileName(filename);
+        return executeShell("7z e " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
     }
 
     res = sha1sumFile("file1.txt");
@@ -440,21 +494,63 @@ unittest
     assert(isFile(buildPath(dir, "meson.build")));
 }
 
-@("Extract 7z")
+// @("Extract 7z")
+// unittest
+// {
+//     import std.algorithm : each;
+//     import std.file : mkdir;
+//     import std.stdio : File;
+
+//     const dm = DeleteMe("extraction_site", null);
+//     const archive = testPath("data/archive.7z");
+
+//     mkdir(dm.path);
+
+//     File(archive, "rb")
+//         .unbox7z()
+//         .each!(e => e.extractTo(dm.path));
+
+//     testExtractedFiles(dm, Yes.mode666);
+// }
+
+@("box 7z")
 unittest
 {
-    import std.algorithm : each;
-    import std.file : mkdir;
-    import std.stdio : File;
+    import std.algorithm : each, map;
+    import std.array : join;
+    import std.range : inputRangeObject;
+    import fs = std.file;
 
-    const dm = DeleteMe("extraction_site", null);
-    const archive = testPath("data/archive.7z");
+    const dm = DeleteMe("dest", ".7z");
+    auto base = dataGenPath();
 
-    mkdir(dm.path);
+    io.writefln!"Start writing\n";
 
-    File(archive, "rb")
+    filesForArchive()
+        .map!(p => fileEntry(p, base))
+        .box7zToFile(dm.path);
+
+    io.writefln!"\nDone writing:";
+
+    readBinaryFile(dm.path)
+        .hexDump(io.stdout.lockingTextWriter);
+
+
+    fs.copy(dm.path, "test_archive.7z");
+
+    io.writefln!"\n\nStart reading:\n";
+
+    void printOut(UnboxEntry e)
+    {
+        io.writefln!" - %s"(e.path);
+        // io.writeln(cast(const(char)[])e.byChunk().join());
+    }
+
+    io.File(dm.path, "rb")
         .unbox7z()
-        .each!(e => e.extractTo(dm.path));
+        .each!printOut;
 
-    testExtractedFiles(dm, Yes.mode666);
+    io.writefln!"\nDone reading\n";
+
+    test7zArchiveContent(dm.path);
 }

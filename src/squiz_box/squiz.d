@@ -2146,7 +2146,7 @@ version (HaveSquizLzma)
         return opts;
     }
 
-    private lzma_filter toLzma(LzmaFilter filter) @trusted
+    package(squiz_box) lzma_filter toLzma(LzmaFilter filter) @trusted
     {
         // dfmt off
         return filter.match!(

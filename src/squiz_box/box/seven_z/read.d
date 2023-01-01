@@ -45,7 +45,7 @@ private struct Unbox7z(C) if (is(C : SearchableCursor))
 
     private void readHeaders()
     {
-        auto signHeader = trace7z!(() => SignatureHeader.read(cursor));
+        auto signHeader = traceRead!(() => SignatureHeader.read(cursor));
         packStartOffset = cursor.pos;
 
         if (signHeader.headerSize == 0)
@@ -60,7 +60,7 @@ private struct Unbox7z(C) if (is(C : SearchableCursor))
 
         auto headerCursor = new ArrayCursor(headerBytes, cursor.source);
 
-        header = trace7z!(() => Header.read(headerCursor, cursor, packStartOffset));
+        header = traceRead!(() => Header.read(headerCursor, cursor, packStartOffset));
     }
 
     private void nextFile()
@@ -213,7 +213,7 @@ private bool attrIsDir(uint attributes) nothrow pure
 package class FolderDecoder
 {
     SearchableCursor cursor;
-    const(StreamsInfo) info;
+    const(MainStreamsInfo) info;
     size_t folder;
 
     SquizAlgo algo;
@@ -225,7 +225,7 @@ package class FolderDecoder
     ubyte[] outBuf;
     ubyte[] availOut;
 
-    this(SearchableCursor cursor, size_t packStartOffset, const(StreamsInfo) info, size_t folder)
+    this(SearchableCursor cursor, size_t packStartOffset, const(MainStreamsInfo) info, size_t folder)
     {
         this.cursor = cursor;
         this.info = info;

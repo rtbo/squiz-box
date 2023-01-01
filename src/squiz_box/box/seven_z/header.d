@@ -47,6 +47,8 @@ enum PropId : ubyte
 }
 // dfmt on
 
+static assert(PropId.sizeof == 1);
+
 PropId readPropId(C)(C cursor)
 {
     return cast(PropId) cursor.get;
@@ -91,59 +93,77 @@ void whileNotEndPropId(alias fun, C)(C cursor)
 
 struct SignatureHeader
 {
-    static const ubyte[6] magicBytes = ['7', 'z', 0xbc, 0xaf, 0x27, 0x1c];
-    static const ubyte[2] versionBytes = [0, 4];
+    ubyte[6] magicBytes;
+    ubyte[2] versionBytes;
+    Crc32 signHeaderCrc;
+    ulong headerOffset;
+    ulong headerSize;
+    Crc32 headerCrc;
 
-    static struct Rep
-    {
-        ubyte[6] signature;
-        ubyte[2] ver;
-        LittleEndian!4 headerCrc;
-        LittleEndian!8 nextHeaderOffset;
-        LittleEndian!8 nextHeaderSize;
-        LittleEndian!4 nextHeaderCrc;
-    }
+    enum byteLength = 32;
+    static const ubyte[6] magicBytesRef = ['7', 'z', 0xbc, 0xaf, 0x27, 0x1c];
+    static const ubyte[2] versionBytesRef = [0, 4];
 
     static SignatureHeader read(C)(C cursor)
     {
-        SignatureHeader.Rep rep = void;
-        cursor.readValue(&rep);
-        enforce(
-            rep.signature == magicBytes,
-            new NotA7zArchiveException(cursor.source, "Not starting by magic bytes"),
+        SignatureHeader res;
+
+        ubyte[byteLength] buf;
+        cursor.read(buf[]);
+
+        auto bufC = new ArrayCursor(buf[]);
+
+        bufC.readValue(&res.magicBytes);
+        if (res.magicBytes != magicBytesRef)
+            bad7z(cursor.source, "Not a 7z file");
+
+        bufC.readValue(&res.versionBytes);
+        if (res.versionBytes != versionBytesRef)
+            unsupported7z(
+                cursor.source,
+                format!"Unsupported 7z version: %s.%s"(res.versionBytes[0], res.versionBytes[1])
         );
 
-        const crc = Crc32.calc(&(rep.signature[0]) + 12, 20);
-        if (crc != rep.headerCrc.val)
-            bad7z(cursor.source, "Could not verify signature header CRC-32");
+        res.signHeaderCrc = bufC.readCrc32();
 
-        SignatureHeader res = void;
-        // check for 0.4
-        res.ver = rep.ver[0] * 10 + rep.ver[1];
-        if (res.ver != 4)
-            unsupported7z(cursor.source, format!"Unsupported 7z version %s.%s"(rep.ver[0], rep.ver[1]));
+        res.headerOffset = bufC.getValue!ulong;
+        res.headerSize = bufC.getValue!ulong;
+        res.headerCrc = bufC.getValue!Crc32;
 
-        res.headerOffset = rep.nextHeaderOffset.val;
-        res.headerSize = rep.nextHeaderSize.val;
-        res.headerCrc = rep.nextHeaderCrc.val;
+        if (res.signHeaderCrc != res.calcSignHeaderCrc)
+            bad7z(cursor.source, "Could not verify signature header integrity");
 
         return res;
     }
 
-    uint ver;
-    ulong headerOffset;
-    ulong headerSize;
-    uint headerCrc;
-
-    @property ulong headerPos()
+    void write(C)(C cursor)
     {
-        return headerOffset + Rep.sizeof;
+        cursor.write(magicBytes);
+        cursor.write(versionBytes);
+        cursor.putValue(signHeaderCrc);
+        cursor.putValue(headerOffset);
+        cursor.putValue(headerSize);
+        cursor.putValue(headerCrc);
+    }
+
+    @property ulong headerPos() const
+    {
+        return headerOffset + byteLength;
+    }
+
+    Crc32 calcSignHeaderCrc() const
+    {
+        Crc32 crc;
+        crc.updateWith(headerOffset);
+        crc.updateWith(headerSize);
+        crc.updateWith(headerCrc);
+        return crc;
     }
 }
 
 struct Header
 {
-    StreamsInfo streamsInfo;
+    MainStreamsInfo streamsInfo;
     FilesInfo filesInfo;
 
     static Header read(HC, C)(HC headerCursor, C mainCursor, ulong packStartOffset)
@@ -163,12 +183,12 @@ struct Header
     {
         Header res;
         headerCursor.enforceGetPropId(PropId.mainStreamsInfo);
-        res.streamsInfo = trace7z!(() => StreamsInfo.read(headerCursor));
+        res.streamsInfo = traceRead!(() => MainStreamsInfo.read(headerCursor));
 
         auto nextId = headerCursor.readPropId();
         if (nextId == PropId.filesInfo)
         {
-            res.filesInfo = trace7z!(() => FilesInfo.read(headerCursor));
+            res.filesInfo = traceRead!(() => FilesInfo.read(headerCursor));
 
             nextId = headerCursor.readPropId();
         }
@@ -181,7 +201,7 @@ struct Header
 
     static Header readEncoded(HC, C)(HC headerCursor, C mainCursor, ulong packStartOffset)
     {
-        const headerStreamsInfo = trace7z!(() => StreamsInfo.read(headerCursor));
+        const headerStreamsInfo = traceRead!(() => HeaderStreamsInfo.read(headerCursor));
 
         enforce(headerStreamsInfo.numFolders == 1, "Invalid encoded header (multiple folders)");
         const packSize = headerStreamsInfo.streamPackSize(0);
@@ -195,24 +215,19 @@ struct Header
             .join();
         assert(unpacked.length = unpackSize);
 
-        static if (false)
-        {
-            size_t pos = 0;
-            io.writefln!"Unpacked header:"();
-            io.writefln!"        %(%02x  %)"(iota(0, 16));
-            io.writeln();
-            while (pos < unpacked.length)
-            {
-                const len = min(16, unpacked.length - pos);
-                io.writefln!"%04x    %(%02x  %)"(pos, unpacked[pos .. pos + len]);
-                pos += len;
-            }
-            io.writeln();
-        }
-
         auto hc = new ArrayCursor(unpacked, mainCursor.source);
         hc.enforceGetPropId(PropId.header);
         return readPlain(hc, mainCursor, packStartOffset);
+    }
+
+    void write(C : WriteCursor)(C cursor)
+    {
+        cursor.put(PropId.header);
+
+        streamsInfo.traceWrite(cursor);
+        filesInfo.traceWrite(cursor);
+
+        cursor.put(PropId.end);
     }
 
     @property size_t numFiles() const
@@ -221,27 +236,23 @@ struct Header
     }
 }
 
-struct StreamsInfo
+struct HeaderStreamsInfo
 {
     PackInfo packInfo;
     CodersInfo codersInfo;
-    SubStreamsInfo subStreamsInfo;
 
-    static StreamsInfo read(C)(C cursor)
+    static HeaderStreamsInfo read(C)(C cursor)
     {
-        StreamsInfo res;
+        HeaderStreamsInfo res;
 
         cursor.whileNotEndPropId!((PropId propId) {
             switch (propId)
             {
             case PropId.packInfo:
-                res.packInfo = trace7z!(() => PackInfo.read(cursor));
+                res.packInfo = traceRead!(() => PackInfo.read(cursor));
                 break;
             case PropId.unpackInfo:
-                res.codersInfo = trace7z!(() => CodersInfo.read(cursor));
-                break;
-            case PropId.subStreamsInfo:
-                res.subStreamsInfo = trace7z!(() => SubStreamsInfo.read(cursor, res));
+                res.codersInfo = traceRead!(() => CodersInfo.read(cursor));
                 break;
             default:
                 unexpectedPropId(cursor.source, propId);
@@ -254,6 +265,92 @@ struct StreamsInfo
         return res;
     }
 
+    void write(C)(C cursor)
+    {
+        cursor.put(PropId.encodedHeader);
+        packInfo.traceWrite(cursor);
+        codersInfo.traceWrite(cursor);
+        cursor.put(PropId.end);
+    }
+
+    mixin StreamsInfoCommon!();
+}
+
+struct MainStreamsInfo
+{
+    PackInfo packInfo;
+    CodersInfo codersInfo;
+    SubStreamsInfo subStreamsInfo;
+
+    static MainStreamsInfo read(C)(C cursor)
+    {
+        MainStreamsInfo res;
+
+        cursor.whileNotEndPropId!((PropId propId) {
+            switch (propId)
+            {
+            case PropId.packInfo:
+                res.packInfo = traceRead!(() => PackInfo.read(cursor));
+                break;
+            case PropId.unpackInfo:
+                res.codersInfo = traceRead!(() => CodersInfo.read(cursor));
+                break;
+            case PropId.subStreamsInfo:
+                res.subStreamsInfo = traceRead!(() => SubStreamsInfo.read(cursor, res));
+                break;
+            default:
+                unexpectedPropId(cursor.source, propId);
+            }
+        });
+
+        if (res.numStreams != res.numFolders)
+            unsupported7z(cursor.source, "Only single stream folders are supported");
+
+        return res;
+    }
+
+    void write(C)(C cursor)
+    {
+        cursor.put(PropId.mainStreamsInfo);
+        packInfo.traceWrite(cursor);
+        codersInfo.traceWrite(cursor);
+        subStreamsInfo.traceWrite(cursor);
+        cursor.put(PropId.end);
+    }
+
+    mixin StreamsInfoCommon!();
+
+    size_t folderSubstreams(size_t f) const
+    {
+        return subStreamsInfo.nums[f];
+    }
+
+    ulong folderSubstreamStart(size_t f, size_t s)
+    {
+        const s0 = subStreamsInfo.folderSizesStartIdx(f);
+
+        ulong start = 0;
+        foreach (ss; 0 .. s)
+            start += subStreamsInfo.sizes[s0 + ss];
+
+        return start;
+    }
+
+    ulong folderSubstreamSize(size_t f, size_t s)
+    {
+        const folderSize = codersInfo.unpackSizes[f];
+        const numStreams = subStreamsInfo.nums[f];
+        const s0 = subStreamsInfo.folderSizesStartIdx(f);
+
+        if (s == numStreams - 1) // last stream of folder
+            return folderSize - sum(subStreamsInfo.sizes[s0 .. s0 + s]);
+        else
+            return subStreamsInfo.sizes[s0 + s];
+    }
+}
+
+private mixin template StreamsInfoCommon()
+{
     @property size_t numStreams() const
     {
         return packInfo.packSizes.length;
@@ -296,34 +393,6 @@ struct StreamsInfo
     {
         return codersInfo.unpackCrcs.length ? codersInfo.unpackCrcs[f] : Crc32(0);
     }
-
-    size_t folderSubstreams(size_t f) const
-    {
-        return subStreamsInfo.nums[f];
-    }
-
-    ulong folderSubstreamStart(size_t f, size_t s)
-    {
-        const s0 = subStreamsInfo.folderSizesStartIdx(f);
-
-        ulong start = 0;
-        foreach (ss; 0 .. s)
-            start += subStreamsInfo.sizes[s0 + ss];
-
-        return start;
-    }
-
-    ulong folderSubstreamSize(size_t f, size_t s)
-    {
-        const folderSize = codersInfo.unpackSizes[f];
-        const numStreams = subStreamsInfo.nums[f];
-        const s0 = subStreamsInfo.folderSizesStartIdx(f);
-
-        if (s == numStreams - 1) // last stream of folder
-            return folderSize - sum(subStreamsInfo.sizes[s0 .. s0 + s]);
-        else
-            return subStreamsInfo.sizes[s0 + s];
-    }
 }
 
 struct PackInfo
@@ -337,7 +406,7 @@ struct PackInfo
         PackInfo res;
         res.packStart = cursor.readNumber();
 
-        const numStreams = cast(size_t)cursor.readNumber();
+        const numStreams = cast(size_t) cursor.readNumber();
 
         cursor.whileNotEndPropId!((PropId propId) {
             switch (propId)
@@ -365,6 +434,28 @@ struct PackInfo
 
         return res;
     }
+
+    void write(C)(C cursor)
+    {
+        cursor.put(PropId.packInfo);
+        cursor.writeNumber(packStart);
+        cursor.writeNumber(packSizes.length);
+        if (packSizes.length)
+        {
+            cursor.put(PropId.size);
+            foreach (s; packSizes)
+                cursor.writeNumber(s);
+        }
+        if (packCrcs.length)
+        {
+            enforce(packCrcs.length == packSizes.length, "Inconsistent CRC length");
+            cursor.put(PropId.crc);
+            cursor.put(0x01); // all defined
+            foreach (crc; packCrcs)
+                cursor.putValue(crc);
+        }
+        cursor.put(PropId.end);
+    }
 }
 
 struct CodersInfo
@@ -376,13 +467,13 @@ struct CodersInfo
     static CodersInfo read(C)(C cursor)
     {
         cursor.enforceGetPropId(PropId.folder);
-        const numFolders = cast(size_t)cursor.readNumber();
+        const numFolders = cast(size_t) cursor.readNumber();
         const bool ext = cursor.get != 0;
         if (ext)
             unsupported7z(cursor.source, "Unsupported out-of-band folder definition");
 
         CodersInfo res;
-        res.folderInfos = hatch!(() => trace7z!(() => FolderInfo.read(cursor)))
+        res.folderInfos = hatch!(() => traceRead!(() => FolderInfo.read(cursor)))
             .take(numFolders)
             .array;
 
@@ -411,6 +502,48 @@ struct CodersInfo
         });
         return res;
     }
+
+    void write(C)(C cursor)
+    {
+        cursor.put(PropId.unpackInfo);
+
+        cursor.put(PropId.folder);
+        cursor.writeNumber(folderInfos.length);
+        cursor.put(0x00); // not external
+        foreach (f; folderInfos)
+            f.traceWrite(cursor);
+
+        if (unpackSizes.length)
+        {
+            cursor.put(PropId.codersUnpackSize);
+            foreach (sz; unpackSizes)
+                cursor.writeNumber(sz);
+        }
+
+        if (unpackCrcs.length)
+        {
+            enforce(
+                unpackCrcs.length == unpackSizes.length,
+                "Inconsistent Unpack state"
+            );
+            cursor.put(PropId.crc);
+            BitArray defined;
+            defined.length = unpackCrcs.length;
+            foreach (i, crc; unpackCrcs)
+            {
+                if (crc)
+                    defined[i] = true;
+            }
+            cursor.writeBooleanList(defined);
+            foreach (crc; unpackCrcs)
+            {
+                if (crc)
+                    cursor.writeCrc32(crc);
+            }
+        }
+
+        cursor.put(PropId.end);
+    }
 }
 
 struct FolderInfo
@@ -419,13 +552,20 @@ struct FolderInfo
 
     static FolderInfo read(C)(C cursor)
     {
-        const numCoders = cast(size_t)cursor.readNumber();
+        const numCoders = cast(size_t) cursor.readNumber();
 
         return FolderInfo(
-            hatch!(() => trace7z!(() => CoderInfo.read(cursor)))
+            hatch!(() => traceRead!(() => CoderInfo.read(cursor)))
                 .take(numCoders)
                 .array
         );
+    }
+
+    void write(C)(C cursor)
+    {
+        cursor.writeNumber(coderInfos.length);
+        foreach (coder; coderInfos)
+            coder.traceWrite(cursor);
     }
 
     SquizAlgo buildUnpackAlgo() const
@@ -447,7 +587,7 @@ struct SubStreamsInfo
     ulong[] sizes; // one entry per substream except for last folder substream
     Crc32[] crcs; // one entry per undefined Crc in parent StreamsInfo
 
-    static SubStreamsInfo read(C)(C cursor, const ref StreamsInfo streamsInfo)
+    static SubStreamsInfo read(C)(C cursor, const ref MainStreamsInfo streamsInfo)
     {
         SubStreamsInfo res;
 
@@ -455,7 +595,7 @@ struct SubStreamsInfo
             switch (propId)
             {
             case PropId.numUnpackStream:
-                res.nums = hatch!(() => cast(size_t)cursor.readNumber())
+                res.nums = hatch!(() => cast(size_t) cursor.readNumber())
                     .take(streamsInfo.numFolders)
                     .array;
                 break;
@@ -473,7 +613,7 @@ struct SubStreamsInfo
         return res;
     }
 
-    void readSizes(C)(C cursor, const ref StreamsInfo streamsInfo)
+    void readSizes(C)(C cursor, const ref MainStreamsInfo streamsInfo)
     {
         if (this.nums.length)
         {
@@ -488,7 +628,7 @@ struct SubStreamsInfo
         }
     }
 
-    void readCrcs(C)(C cursor, const ref StreamsInfo streamsInfo)
+    void readCrcs(C)(C cursor, const ref MainStreamsInfo streamsInfo)
     {
         const numFolders = streamsInfo.numFolders;
         size_t numCrcs = 0;
@@ -511,6 +651,34 @@ struct SubStreamsInfo
         }
     }
 
+    void write(C)(C cursor)
+    {
+        if (nums.length == 0 && sizes.length == 0 && crcs.length == 0)
+            return;
+
+        cursor.put(PropId.subStreamsInfo);
+        if (nums.length)
+        {
+            cursor.put(PropId.numUnpackStream);
+            foreach (n; nums)
+                cursor.writeNumber(n);
+        }
+        if (sizes.length)
+        {
+            cursor.put(PropId.size);
+            foreach (s; sizes)
+                cursor.writeNumber(s);
+        }
+        if (crcs.length)
+        {
+            cursor.put(PropId.crc);
+            cursor.put(0x01); // all defined
+            foreach (crc; crcs)
+                cursor.putValue(crc);
+        }
+        cursor.put(PropId.end);
+    }
+
     size_t folderSizesStartIdx(size_t f)
     {
         size_t idx = 0;
@@ -522,6 +690,16 @@ struct SubStreamsInfo
 
 private enum long hnsecsFrom1601 = 504_911_232_000_000_000L;
 
+private long toStdTime(long sevZtime)
+{
+    return sevZtime + hnsecsFrom1601;
+}
+
+private long toSevZtime(long stdTime)
+{
+    return stdTime - hnsecsFrom1601;
+}
+
 struct FileInfo
 {
     string name;
@@ -531,23 +709,21 @@ struct FileInfo
 
     uint attributes;
 
-    bool emptyStream;
-    bool emptyFile;
-    bool antiFile;
+    bool emptyStream; // could be an empty file or directory
+    bool emptyFile; // plain empty file
 
-    void setTime(PropId typ, long tim)
+    void setTime(PropId id, long time)
     {
-        const stdTime = tim + hnsecsFrom1601;
-        switch (typ)
+        switch (id)
         {
         case PropId.ctime:
-            ctime = stdTime;
+            ctime = time;
             break;
         case PropId.atime:
-            atime = stdTime;
+            atime = time;
             break;
         case PropId.mtime:
-            mtime = stdTime;
+            mtime = time;
             break;
         default:
             assert(false);
@@ -565,7 +741,7 @@ struct FilesInfo
     {
         FilesInfo res;
 
-        const numFiles = cast(size_t)cursor.readNumber();
+        const numFiles = cast(size_t) cursor.readNumber();
         res.files = new FileInfo[numFiles];
         size_t numEmptyStreams = 0;
 
@@ -601,33 +777,30 @@ struct FilesInfo
                 }
                 break;
             case PropId.anti:
-                auto antiFiles = cursor.readBitField(numEmptyStreams);
-                size_t i;
-                foreach (ref f; res.files)
-                {
-                    if (f.emptyStream)
-                        f.antiFile = antiFiles[i++];
-                }
-                break;
+                // file item that delete a file or directory (used by 7-zip for updating archives)
+                unsupported7z(cursor.source, "Anti-file are not supported");
             case PropId.names:
-                //const defined = cursor.readBooleanList(numFiles);
                 const external = !!cursor.get;
                 if (external)
                     unsupported7z(cursor.source, "Out-of-band file name");
+                const sz = size - 1;
+                if (sz % 2 != 0)
+                    bad7z(cursor.source, "Expected even bytes for UTF16");
+                const(wchar)[] nameData = cast(const(wchar)[]) readArray(cursor, sz);
+                version (BigEndian)
+                {
+                    static assert(false, "Big endian not supported");
+                }
                 foreach (i, ref f; res.files)
                 {
                     import std.encoding : transcode;
 
-                    // if (!defined[i])
-                    //     continue;
+                    size_t len = 0;
+                    while (nameData[len] != 0)
+                    len++;
 
-                    wstring wname;
-                    wchar c = cursor.getValue!wchar();
-                    while (c != 0)
-                    {
-                        wname ~= c;
-                        c = cursor.getValue!wchar();
-                    }
+                    const wname = nameData[0 .. len];
+                    nameData = nameData[len + 1 .. $];
                     transcode(wname, f.name);
                 }
                 break;
@@ -642,10 +815,10 @@ struct FilesInfo
                 {
                     if (!defined[i])
                     continue;
-                    const data = cursor.getValue!long();
-                    if (data >= long.max - hnsecsFrom1601)
+                    const time = cursor.getValue!long();
+                    if (time >= long.max - hnsecsFrom1601)
                         bad7z(cursor.source, "Inconsistent file timestamp");
-                    f.setTime(propId, data);
+                    f.setTime(propId, toStdTime(time));
                 }
                 break;
             case PropId.attributes:
@@ -667,6 +840,125 @@ struct FilesInfo
         });
 
         return res;
+    }
+
+    void write(C)(C cursor) const
+    {
+        if (!files.length)
+            return;
+
+        cursor.put(PropId.filesInfo);
+        cursor.writeNumber(files.length);
+
+        BitArray emptyStreams;
+        BitArray emptyFiles;
+        BitArray definedMtime;
+        BitArray definedCtime;
+        BitArray definedAtime;
+        BitArray definedAttrs;
+
+        emptyStreams.length = files.length;
+        definedMtime.length = files.length;
+        definedCtime.length = files.length;
+        definedAtime.length = files.length;
+        definedAttrs.length = files.length;
+
+        foreach (i, const ref f; files)
+        {
+            if (f.emptyStream)
+            {
+                emptyStreams[i] = true;
+                emptyFiles ~= f.emptyFile;
+            }
+
+            if (f.mtime)
+                definedMtime[i] = true;
+            if (f.ctime)
+                definedCtime[i] = true;
+            if (f.atime)
+                definedAtime[i] = true;
+            if (f.attributes)
+                definedAttrs[i] = true;
+        }
+
+        void writeProperty(PropId propId, const(ubyte)[] data)
+        {
+            cursor.put(propId);
+            cursor.writeNumber(data.length);
+            cursor.write(data);
+        }
+
+        auto bufC = new ArrayWriteCursor();
+
+        // empty streams
+        bufC.writeBooleanList(emptyStreams);
+        writeProperty(PropId.emptyStream, bufC.data);
+        bufC.clear();
+
+        // empty files
+        bufC.writeBooleanList(emptyFiles);
+        writeProperty(PropId.emptyFile, bufC.data);
+        bufC.clear();
+
+        // names
+        bufC.put(0x00); // not external
+        foreach (f; files)
+        {
+            import std.encoding : transcode;
+
+            wstring utf16;
+            transcode(f.name, utf16);
+            utf16 ~= wchar(0);
+            bufC.write(cast(const(ubyte)[]) utf16);
+        }
+        writeProperty(PropId.names, bufC.data);
+        bufC.clear();
+
+        // mtime
+        bufC.writeBooleanList(definedMtime);
+        bufC.put(0x00); // not external
+        foreach (f; files)
+        {
+            if (f.mtime)
+                bufC.putValue(toSevZtime(f.mtime));
+        }
+        writeProperty(PropId.mtime, bufC.data);
+        bufC.clear();
+
+        // ctime
+        bufC.writeBooleanList(definedCtime);
+        bufC.put(0x00); // not external
+        foreach (f; files)
+        {
+            if (f.ctime)
+                bufC.putValue(toSevZtime(f.ctime));
+        }
+        writeProperty(PropId.ctime, bufC.data);
+        bufC.clear();
+
+        // atime
+        bufC.writeBooleanList(definedAtime);
+        bufC.put(0x00); // not external
+        foreach (f; files)
+        {
+            if (f.atime)
+                bufC.putValue(toSevZtime(f.atime));
+        }
+        writeProperty(PropId.atime, bufC.data);
+        bufC.clear();
+
+        // attrs
+        bufC.writeBooleanList(definedAttrs);
+        bufC.put(0x00); // not external
+        foreach (f; files)
+        {
+            if (f.attributes)
+                bufC.putValue(f.attributes);
+        }
+        writeProperty(PropId.attributes, bufC.data);
+        bufC.clear();
+
+        cursor.put(PropId.end);
     }
 }
 
@@ -690,14 +982,35 @@ struct CoderFlags
         return rep & 0x0f;
     }
 
+    @property void idSize(ubyte sz)
+    {
+        rep = (rep & 0xf0) | (sz & 0x0f);
+    }
+
     @property bool isComplexCoder() const
     {
         return (rep & 0x10) != 0;
     }
 
+    @property void isComplexCoder(bool complex)
+    {
+        if (complex)
+            rep |= 0b0001_0000;
+        else
+            rep &= 0b1110_1111;
+    }
+
     @property bool thereAreAttributes() const
     {
         return (rep & 0x20) != 0;
+    }
+
+    @property void thereAreAttributes(bool yes)
+    {
+        if (yes)
+            rep |= 0b0010_0000;
+        else
+            rep &= 0b1101_1111;
     }
 }
 
@@ -728,6 +1041,19 @@ enum CoderId : uint
 }
 // dfmt on
 
+@property ubyte coderIdSize(CoderId id)
+{
+    const num = cast(uint) id;
+    if (num <= 0xff)
+        return 1;
+    else if (num <= 0xffff)
+        return 2;
+    else if (num <= 0xff_ffff)
+        return 3;
+    else
+        return 4;
+}
+
 struct CoderInfo
 {
     CoderId id;
@@ -749,7 +1075,7 @@ struct CoderInfo
         ubyte[] coderProps;
         if (flags.thereAreAttributes)
         {
-            const size = cast(size_t)readNumber(cursor);
+            const size = cast(size_t) readNumber(cursor);
             coderProps = new ubyte[size];
             cursor.read(coderProps);
         }
@@ -762,6 +1088,35 @@ struct CoderInfo
         }
 
         return CoderInfo(cast(CoderId) coderId, coderProps);
+    }
+
+    void write(C)(C cursor)
+    {
+        const flags = CoderFlags(
+            coderIdSize(id),
+            No.isComplexCoder,
+            cast(Flag!"thereAreAttributes")(props.length > 0)
+        );
+        cursor.put(flags.rep);
+
+        ubyte[4] idBuf;
+        ubyte ind;
+        uint pos = flags.idSize;
+        uint cid = cast(uint) id;
+        while (pos > 0)
+        {
+            pos--;
+            const shift = pos * 8;
+            const mask = 0xff << shift;
+            idBuf[ind] = cast(ubyte)((cid & mask) >> shift);
+            ind++;
+        }
+        cursor.write(idBuf[0 .. ind]);
+        if (props.length)
+        {
+            cursor.writeNumber(props.length);
+            cursor.write(props);
+        }
     }
 
     @property bool isLzmaFilter() const

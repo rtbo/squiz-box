@@ -426,6 +426,13 @@ interface WriteCursor
 {
     void put(ubyte val);
 
+    void putValue(T)(T value)
+    {
+        auto ptr = cast(const(ubyte)*)&value;
+        auto slice = ptr[0 .. T.sizeof];
+        write(slice);
+    }
+
     void write(const(ubyte)[] arr);
 }
 
@@ -435,7 +442,7 @@ interface SearchableWriteCursor : WriteCursor
     void seek(ulong pos);
 }
 
-class ArrayWriteCursor : SearchableWriteCursor
+final class ArrayWriteCursor : SearchableWriteCursor
 {
     ubyte[] _data;
     size_t _writePos;
@@ -465,6 +472,12 @@ class ArrayWriteCursor : SearchableWriteCursor
     void reserveCapacity(size_t cap)
     {
         reserve(_data, cap);
+    }
+
+    void clear()
+    {
+        _data.length = 0;
+        _writePos = 0;
     }
 
     ulong tell()
@@ -507,7 +520,7 @@ class ArrayWriteCursor : SearchableWriteCursor
     }
 }
 
-class FileWriteCursor : WriteCursor
+final class FileWriteCursor : WriteCursor
 {
     import std.stdio : File;
 
@@ -553,6 +566,21 @@ class FileWriteCursor : WriteCursor
     void write(const(ubyte)[] arr)
     {
         _file.rawWrite(arr);
+    }
+}
+
+auto cursorOutputRange(C)(C cursor) if (is(C : WriteCursor))
+{
+    return CursorOutputRange!C(cursor);
+}
+
+struct CursorOutputRange(C : WriteCursor)
+{
+    C cursor;
+
+    void put(const(ubyte)[] data)
+    {
+        cursor.write(data);
     }
 }
 

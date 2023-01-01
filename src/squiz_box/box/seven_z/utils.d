@@ -11,9 +11,9 @@ import std.range;
 import io = std.stdio;
 import std.typecons;
 
-auto trace7z(alias fun)(string func = __FUNCTION__)
+auto traceRead(alias fun)(string func = __FUNCTION__)
 {
-    enum doTrace = false;
+    enum doTrace = true;
 
     static if (doTrace)
     {
@@ -24,6 +24,44 @@ auto trace7z(alias fun)(string func = __FUNCTION__)
     else
     {
         return fun();
+    }
+}
+
+template traceWrite(string method = "write")
+{
+    void traceWrite(T, C)(T obj, C cursor, string func = __FUNCTION__)
+    {
+        enum doTrace = true;
+
+        static if (doTrace)
+        {
+            import squiz_box.util : hexDump;
+
+            static if (is(C : ArrayWriteCursor))
+            {
+                size_t start = cursor.tell;
+                mixin("obj." ~ method ~ "(cursor);");
+                size_t end = cursor.tell;
+                const(ubyte)[] data = cursor.data[start .. end];
+            }
+            else
+            {
+                auto memC = new ArrayWriteCursor();
+                mixin("obj." ~ method ~ "(memC);");
+                const(ubyte)[] data = memC.data;
+                cursor.write(data);
+            }
+            io.writefln!"%s:"(func);
+            io.writefln!"  - struct: %s"(obj);
+            io.writefln!"  - data written:"();
+            hexDump(only(data), io.stdout.lockingTextWriter);
+            io.writefln!""();
+        }
+        else
+        {
+            mixin("obj." ~ method ~ "(cursor);");
+        }
+
     }
 }
 
@@ -74,11 +112,32 @@ struct Crc32
 
         return Crc32(crc32(seed.crc, dataPtr, cast(uint) dataLen));
     }
+
+    void update(const(ubyte)[] chunk) @trusted
+    {
+        import squiz_box.c.zlib : crc32;
+
+        crc = crc32(crc, chunk.ptr, cast(uint) chunk.length);
+    }
+
+    void updateWith(T)(T value) @trusted
+    {
+        import squiz_box.c.zlib : crc32;
+
+        auto ptr = cast(ubyte*)&value;
+        auto len = T.sizeof;
+        crc = crc32(crc, ptr, cast(uint) len);
+    }
 }
 
 Crc32 readCrc32(C)(C cursor)
 {
     return Crc32(cursor.getValue!uint);
+}
+
+void writeCrc32(C)(C cursor, Crc32 crc)
+{
+    cursor.putValue(crc.crc);
 }
 
 const(ubyte)[] readArray(C)(C cursor, size_t len, string msg = null)
@@ -245,6 +304,60 @@ BitArray readBitField(C)(C cursor, size_t count)
     return res;
 }
 
+void writeBitField(C)(C cursor, BitArray array)
+{
+    ubyte mask = 0;
+    ubyte pos = 8;
+    foreach (b; array)
+    {
+        pos--;
+
+        if (b)
+            mask |= (1 << pos);
+
+        if (pos == 0)
+        {
+            cursor.put(mask);
+            pos = 8;
+            mask = 0;
+        }
+    }
+    if (pos < 8)
+        cursor.put(mask);
+}
+
+@("readBitField / writeBitField")
+unittest
+{
+    auto field5 = BitArray([
+        true, false, false, true, true
+    ]);
+    auto field8 = BitArray([
+        false, false, true, true, true, false, false, true
+    ]);
+    auto field10 = BitArray([
+        false, false, true, true, true, false, false, true, false, true
+    ]);
+
+    ubyte[] data5 = [0b1001_1000];
+    ubyte[] data8 = [0b0011_1001];
+    ubyte[] data10 = [0b0011_1001, 0b0100_0000];
+
+    void testField(BitArray field, ubyte[] data)
+    {
+        auto writeC = new ArrayWriteCursor();
+        writeBitField(writeC, field);
+        assert(writeC.data == data);
+
+        auto readC = new ArrayCursor(data);
+        assert(readBitField(readC, field.length) == field);
+    }
+
+    testField(field5, data5);
+    testField(field8, data8);
+    testField(field10, data10);
+}
+
 BitArray readBooleanList(C)(C cursor, size_t count)
 {
     // check all-defined in a single bool
@@ -258,4 +371,16 @@ BitArray readBooleanList(C)(C cursor, size_t count)
 
     // otherwise it is a bitfield
     return cursor.readBitField(count);
+}
+
+void writeBooleanList(C)(C cursor, BitArray array)
+{
+    if (array.length == array.count)
+    {
+        cursor.put(0x01);
+        return;
+    }
+
+    cursor.put(0x00);
+    writeBitField(cursor, array);
 }

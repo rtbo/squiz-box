@@ -18,6 +18,7 @@ squiz_src = files([
     'src/squiz_box/box/seven_z/package.d',
     'src/squiz_box/box/seven_z/read.d',
     'src/squiz_box/box/seven_z/utils.d',
+    'src/squiz_box/box/seven_z/write.d',
 
     'src/squiz_box/package.d',
     'src/squiz_box/priv.d',
