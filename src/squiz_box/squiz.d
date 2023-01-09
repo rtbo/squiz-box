@@ -2474,7 +2474,8 @@ version (HaveSquizLzma)
                 res = lzma_raw_decoder(&stream.strm, chain.ptr);
                 break;
             }
-            enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: ", res.to!string);
+
+            enforce(res == lzma_ret.OK, "Could not initialize LZMA encoder: " ~ res.to!string);
         }
 
         Flag!"streamEnded" process(Stream stream, Flag!"lastChunk" lastChunk) @safe
