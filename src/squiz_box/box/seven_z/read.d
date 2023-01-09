@@ -1,6 +1,7 @@
 module squiz_box.box.seven_z.read;
 
 import squiz_box.box.seven_z.header;
+import squiz_box.box.seven_z.utils;
 import squiz_box.box;
 import squiz_box.squiz;
 import squiz_box.priv;
@@ -75,7 +76,8 @@ private struct Unbox7z(C) if (is(C : SearchableCursor))
         if (!decoder)
             decoder = new FolderDecoder(cursor, packStartOffset, header.streamsInfo, currentFolder);
 
-        currentEntry = new SevZUnboxEntry(info, sizeUnpack, startUnpack, decoder);
+        const expectedCrc = header.streamsInfo.folderSubstreamCrc(currentFolder, currentSubstream);
+        currentEntry = new SevZUnboxEntry(info, sizeUnpack, startUnpack, decoder, cursor.source, expectedCrc);
 
         currentFile++;
         currentSubstream++;
@@ -112,20 +114,24 @@ private final class SevZUnboxEntry : UnboxEntry
     size_t _size;
     size_t _unpackPos;
     FolderDecoder _decoder;
+    string _archive;
+    Crc32 _expectedCrc;
 
-    this(FileInfo info, size_t size, size_t unpackPos, FolderDecoder decoder)
+    this(FileInfo info, size_t size, size_t unpackPos, FolderDecoder decoder, string archive, Crc32 expectedCrc)
     {
         _info = info;
         _size = size;
         _unpackPos = unpackPos;
         _decoder = decoder;
+        _archive = archive;
+        _expectedCrc = expectedCrc;
     }
 
     ByteRange byChunk(size_t chunkSize = defaultChunkSize)
     {
         return inputRangeObject!EntryDecoderRange(
-            EntryDecoderRange(_decoder, _unpackPos, _unpackPos + _size, chunkSize)
-        );
+            EntryDecoderRange(_decoder, _unpackPos, _unpackPos + _size,
+                chunkSize, _archive, _info.name, _expectedCrc));
     }
 
     @property size_t entrySize()
@@ -243,7 +249,7 @@ package class FolderDecoder
     {
         ubyte[] res;
 
-        while(res.length < buf.length)
+        while (res.length < buf.length)
         {
             // take what's left from stream.output
             if (availOut.length)
@@ -291,13 +297,20 @@ private struct EntryDecoderRange
     ulong end;
     ubyte[] buffer;
     ubyte[] chunk;
+    string archive;
+    string entry;
+    Crc32 expectedCrc;
+    Crc32 currentCrc;
 
-    this(FolderDecoder decoder, ulong pos, ulong end, size_t chunkSize)
+    this(FolderDecoder decoder, ulong pos, ulong end, size_t chunkSize, string archive, string entry, Crc32 crc)
     {
         this.decoder = decoder;
         this.pos = pos;
         this.end = end;
-        buffer = new ubyte[chunkSize];
+        this.buffer = new ubyte[chunkSize];
+        this.archive = archive;
+        this.entry = entry;
+        this.expectedCrc = crc;
 
         prime();
     }
@@ -312,6 +325,22 @@ private struct EntryDecoderRange
             chunk = buffer[0 .. chunk.length + res.length];
             pos += res.length;
         }
+
+        if (chunk.length && expectedCrc)
+        {
+            currentCrc.update(chunk);
+
+            if (pos == end && currentCrc != expectedCrc)
+            {
+                throw new DataIntegrity7zArchiveException(
+                    archive,
+                    entry,
+                    cast(uint) expectedCrc,
+                    cast(uint) currentCrc
+                );
+            }
+        }
+
     }
 
     bool empty()
