@@ -333,7 +333,7 @@ struct MainStreamsInfo
 
     size_t folderSubstreams(size_t f) const
     {
-        return subStreamsInfo.nums[f];
+        return subStreamsInfo.nums.length ? subStreamsInfo.nums[f] : 1;
     }
 
     ulong folderSubstreamStart(size_t f, size_t s)
@@ -350,13 +350,40 @@ struct MainStreamsInfo
     ulong folderSubstreamSize(size_t f, size_t s)
     {
         const folderSize = codersInfo.unpackSizes[f];
-        const numStreams = subStreamsInfo.nums[f];
+        const numStreams = folderSubstreams(f);
         const s0 = subStreamsInfo.folderSizesStartIdx(f);
 
         if (s == numStreams - 1) // last stream of folder
             return folderSize - sum(subStreamsInfo.sizes[s0 .. s0 + s]);
         else
             return subStreamsInfo.sizes[s0 + s];
+    }
+
+    Crc32 folderSubstreamCrc(size_t f, size_t s)
+    {
+        if (folderSubstreams(f) == 1)
+        {
+            const crc = folderUnpackCrc32(f);
+            if (crc)
+                return crc;
+        }
+
+        // count number of undefined CRCs before f
+        size_t numCrcs = 0;
+        foreach (ff; 0 .. f)
+        {
+            const num = folderSubstreams(ff);
+            if (num == 1 && !folderUnpackCrc32(f))
+                numCrcs += 1;
+            else if (num > 1)
+                numCrcs += num;
+        }
+
+        const idx = numCrcs + s;
+        if (idx < subStreamsInfo.crcs.length)
+            return subStreamsInfo.crcs[idx];
+
+        return Crc32(0);
     }
 }
 
