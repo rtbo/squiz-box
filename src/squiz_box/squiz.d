@@ -573,7 +573,7 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
             const len = min(chunkBuffer.length - chunk.length, maxLen);
             stream.output = chunkBuffer[chunk.length .. chunk.length + len];
 
-            const streamEnded = algo.process(stream, cast(Flag!"lastChunk") (input.empty && lastInput));
+            const streamEnded = algo.process(stream, cast(Flag!"lastChunk")(input.empty && lastInput));
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
             maxLen -= len;
