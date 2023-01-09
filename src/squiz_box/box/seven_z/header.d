@@ -492,8 +492,9 @@ struct CodersInfo
             switch (propId)
             {
             case PropId.codersUnpackSize:
+                const numUnpackSizes = sum(res.folderInfos.map!(f => f.numOutStreams));
                 res.unpackSizes = hatch!(() => cursor.readNumber())
-                    .take(numFolders)
+                    .take(numUnpackSizes)
                     .array;
                 break;
             case PropId.crc:
@@ -557,19 +558,43 @@ struct CodersInfo
     }
 }
 
+struct BindPair
+{
+    size_t input;
+    size_t output;
+}
+
 struct FolderInfo
 {
+
     CoderInfo[] coderInfos;
+    BindPair[] bindPairs;
 
     static FolderInfo read(C)(C cursor)
     {
+        FolderInfo res;
+
         const numCoders = cast(size_t) cursor.readNumber();
 
-        return FolderInfo(
-            hatch!(() => traceRead!(() => CoderInfo.read(cursor)))
-                .take(numCoders)
-                .array
-        );
+        res.coderInfos = hatch!(() => traceRead!(() => CoderInfo.read(cursor)))
+            .take(numCoders)
+            .array;
+
+        const numBindPairs = res.numOutStreams - 1;
+        if (numBindPairs > 0)
+        {
+            res.bindPairs = new BindPair[numBindPairs];
+            foreach (ref bp; res.bindPairs)
+            {
+                bp.input = cursor.readNumber();
+                bp.output = cursor.readNumber();
+            }
+        }
+        const numPackedStreams = res.numInStreams - numBindPairs;
+        if (numPackedStreams > 1)
+            unsupported7z(cursor.source, "Unsupported packed stream index (complex coder)");
+
+        return res;
     }
 
     void write(C)(C cursor)
@@ -577,6 +602,21 @@ struct FolderInfo
         cursor.writeNumber(coderInfos.length);
         foreach (coder; coderInfos)
             coder.traceWrite(cursor);
+        foreach (bp; bindPairs)
+        {
+            cursor.writeNumber(bp.input);
+            cursor.writeNumber(bp.output);
+        }
+    }
+
+    size_t numInStreams() const
+    {
+        return sum(this.coderInfos.map!(ci => ci.numInStreams));
+    }
+
+    size_t numOutStreams() const
+    {
+        return sum(this.coderInfos.map!(ci => ci.numOutStreams));
     }
 
     SquizAlgo buildUnpackAlgo() const
@@ -1079,11 +1119,15 @@ struct CoderInfo
     CoderId id;
     ubyte[] props;
 
+    // complex coder not supported
+    enum numInStreams = 1;
+    enum numOutStreams = 1;
+
     static CoderInfo read(C)(C cursor)
     {
         const flags = CoderFlags(cursor.get);
         if (flags.isComplexCoder)
-            unsupported7z(cursor.source, "unsupported complex coder");
+            unsupported7z(cursor.source, "Complex coders are not supported");
 
         if (flags.idSize < 1 || flags.idSize > 4)
             bad7z(cursor.source, format!"Improper coder id size: %s"(flags.idSize));
