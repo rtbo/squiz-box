@@ -584,6 +584,8 @@ struct FolderInfo
         if (coderInfos.all!(ci => ci.isLzmaFilter))
         {
             auto filters = coderInfos.map!(ci => ci.lzmaFilter).array;
+            // 7z specify filters in decompression order, but LZMA expects them in compression order
+            reverse(filters);
             return squizAlgo(DecompressLzma(filters));
         }
 
