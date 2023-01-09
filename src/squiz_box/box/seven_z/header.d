@@ -971,14 +971,18 @@ struct FilesInfo
         auto bufC = new ArrayWriteCursor();
 
         // empty streams
-        bufC.writeBooleanList(emptyStreams);
-        writeProperty(PropId.emptyStream, bufC.data);
-        bufC.clear();
+        if (emptyStreams.count)
+        {
+            bufC.writeBooleanList(emptyStreams);
+            writeProperty(PropId.emptyStream, bufC.data);
+            bufC.clear();
 
-        // empty files
-        bufC.writeBooleanList(emptyFiles);
-        writeProperty(PropId.emptyFile, bufC.data);
-        bufC.clear();
+            // empty files
+            bufC.writeBooleanList(emptyFiles);
+            writeProperty(PropId.emptyFile, bufC.data);
+            bufC.clear();
+
+        }
 
         // names
         bufC.put(0x00); // not external
@@ -995,48 +999,60 @@ struct FilesInfo
         bufC.clear();
 
         // mtime
-        bufC.writeBooleanList(definedMtime);
-        bufC.put(0x00); // not external
-        foreach (f; files)
+        if (definedMtime.count)
         {
-            if (f.mtime)
-                bufC.putValue(toSevZtime(f.mtime));
+            bufC.writeBooleanList(definedMtime);
+            bufC.put(0x00); // not external
+            foreach (f; files)
+            {
+                if (f.mtime)
+                    bufC.putValue(toSevZtime(f.mtime));
+            }
+            writeProperty(PropId.mtime, bufC.data);
+            bufC.clear();
         }
-        writeProperty(PropId.mtime, bufC.data);
-        bufC.clear();
 
         // ctime
-        bufC.writeBooleanList(definedCtime);
-        bufC.put(0x00); // not external
-        foreach (f; files)
+        if (definedCtime.count)
         {
-            if (f.ctime)
-                bufC.putValue(toSevZtime(f.ctime));
+            bufC.writeBooleanList(definedCtime);
+            bufC.put(0x00); // not external
+            foreach (f; files)
+            {
+                if (f.ctime)
+                    bufC.putValue(toSevZtime(f.ctime));
+            }
+            writeProperty(PropId.ctime, bufC.data);
+            bufC.clear();
         }
-        writeProperty(PropId.ctime, bufC.data);
-        bufC.clear();
 
         // atime
-        bufC.writeBooleanList(definedAtime);
-        bufC.put(0x00); // not external
-        foreach (f; files)
+        if (definedAtime.count)
         {
-            if (f.atime)
-                bufC.putValue(toSevZtime(f.atime));
+            bufC.writeBooleanList(definedAtime);
+            bufC.put(0x00); // not external
+            foreach (f; files)
+            {
+                if (f.atime)
+                    bufC.putValue(toSevZtime(f.atime));
+            }
+            writeProperty(PropId.atime, bufC.data);
+            bufC.clear();
         }
-        writeProperty(PropId.atime, bufC.data);
-        bufC.clear();
 
         // attrs
-        bufC.writeBooleanList(definedAttrs);
-        bufC.put(0x00); // not external
-        foreach (f; files)
+        if (definedAttrs.count)
         {
-            if (f.attributes)
-                bufC.putValue(f.attributes);
+            bufC.writeBooleanList(definedAttrs);
+            bufC.put(0x00); // not external
+            foreach (f; files)
+            {
+                if (f.attributes)
+                    bufC.putValue(f.attributes);
+            }
+            writeProperty(PropId.attributes, bufC.data);
+            bufC.clear();
         }
-        writeProperty(PropId.attributes, bufC.data);
-        bufC.clear();
 
         cursor.put(PropId.end);
     }
