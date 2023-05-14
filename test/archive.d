@@ -115,7 +115,8 @@ void test7zArchiveContent(string archivePath)
     const line2 = `\s*7\s.+file1.txt$`;
     const line3 = `\s*26\s.+folder/chmod 666.txt$`;
 
-    auto res = execute(["7z", "l", "-slt", archivePath]);
+    const tool = "/home/remi/src/p7zip_16.02_src_all/p7zip_16.02/bin/7za";
+    auto res = execute([tool, "l", "-slt", archivePath]);
     debug
     {
         import std.stdio : writeln;
@@ -466,6 +467,7 @@ version (HaveSquizLzma)
 unittest
 {
     import std.algorithm;
+    import std.datetime : dur;
     import std.file;
     import std.net.curl;
     import std.path;
@@ -477,7 +479,14 @@ unittest
     auto file = buildPath(tempDir(), "squiz-box-0.2.1.zip");
     auto dir = buildPath(tempDir(), "squiz-box-0.2.1");
 
-    download(url, file);
+    auto conn = HTTP();
+    conn.operationTimeout = dur!"seconds"(5);
+
+    try
+        download(url, file, conn);
+    catch(CurlTimeoutException)
+        return;
+
     mkdirRecurse(dir);
 
     version (Posix)
@@ -494,24 +503,25 @@ unittest
     assert(isFile(buildPath(dir, "meson.build")));
 }
 
-// @("Extract 7z")
-// unittest
-// {
-//     import std.algorithm : each;
-//     import std.file : mkdir;
-//     import std.stdio : File;
+@("Extract 7z")
+unittest
+{
+    import std.algorithm : each;
+    import std.file : mkdir;
+    import std.stdio : File;
 
-//     const dm = DeleteMe("extraction_site", null);
-//     const archive = testPath("data/archive.7z");
+    const dm = DeleteMe("extraction_site", null);
+    const archive = testPath("data/archive.7z");
+    // const archive = "/home/remi/dev/squiz-box/builds/debug-dmd/pyarchive.7z";
 
-//     mkdir(dm.path);
+    mkdir(dm.path);
 
-//     File(archive, "rb")
-//         .unbox7z()
-//         .each!(e => e.extractTo(dm.path));
+    File(archive, "rb")
+        .unbox7z()
+        .each!(e => e.extractTo(dm.path));
 
-//     testExtractedFiles(dm, Yes.mode666);
-// }
+    testExtractedFiles(dm, Yes.mode666);
+}
 
 @("box 7z")
 unittest
@@ -534,7 +544,6 @@ unittest
 
     readBinaryFile(dm.path)
         .hexDump(io.stdout.lockingTextWriter);
-
 
     fs.copy(dm.path, "test_archive.7z");
 
