@@ -863,18 +863,10 @@ struct CoderInfo
             {
                 return squizAlgo(DecompressBzip2());
             }
-            else
-            {
-                continue;
-            }
         case CoderId.zstd:
             version (HaveSquizZstandard)
             {
                 return squizAlgo(DecompressZstd());
-            }
-            else
-            {
-                continue;
             }
         case CoderId.deflate64:
         case CoderId.p7zBcj:
