@@ -4,7 +4,7 @@
 
 if get_option('enable_bzip2') and not get_option('minimal')
     bz2_dep = dependency('bzip2',
-        version: '>=1.0.8',
+        version: '>=1.0.6',
         method: 'pkg-config',
         required: false,
     )
