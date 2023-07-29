@@ -287,8 +287,7 @@ unittest
     assert(getSize(dm.path) == len);
 }
 
-/// Generate potentially large but repetitive data constituted of the same phrase repeated
-/// over and over until byteSize is written out.
+/// Generate potentially very large amount of binary random data until byteSize is written out
 auto generateRandomData(size_t byteSize, uint seed = unpredictableSeed(), size_t chunkSize = 8192)
 {
     auto eng = Random(seed);
