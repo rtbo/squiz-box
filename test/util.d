@@ -83,7 +83,7 @@ struct DeleteMe
 }
 
 // used in place of DeleteMe if needed to inspect the file after the test
-struct Path
+struct DontDeleteMe
 {
     this(string basename, string ext)
     {
