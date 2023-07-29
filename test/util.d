@@ -50,6 +50,51 @@ string testPath(Args...)(Args args)
     return buildNormalizedPath(__FILE_FULL_PATH__.dirName(), args);
 }
 
+/// Find a program executable name in the system PATH and return its full path
+string findProgram(in string name)
+{
+    import std.process : environment;
+
+    version (Windows)
+    {
+        import std.algorithm : endsWith;
+
+        const efn = name.endsWith(".exe") ? name : name ~ ".exe";
+    }
+    else
+    {
+        const efn = name;
+    }
+
+    return searchInEnvPath(environment["PATH"], efn);
+}
+
+/// environment variable path separator
+version (Posix)
+    enum envPathSep = ':';
+else version (Windows)
+    enum envPathSep = ';';
+else
+    static assert(false);
+
+/// Search for filename in the envPath variable content which can
+/// contain multiple paths separated with sep depending on platform.
+/// Returns: null if the file can't be found.
+string searchInEnvPath(in string envPath, in string filename, in char sep = envPathSep)
+{
+    import std.algorithm : splitter;
+    import std.file : exists;
+    import std.path : buildPath;
+
+    foreach (dir; splitter(envPath, sep))
+    {
+        const filePath = buildPath(dir, filename);
+        if (exists(filePath))
+            return filePath;
+    }
+    return null;
+}
+
 /// Defines a path in a temporary location
 /// and delete the file or directory (recursively) at that path when going out of scope.
 struct DeleteMe
