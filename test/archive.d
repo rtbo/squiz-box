@@ -95,25 +95,19 @@ void testZipArchiveContent(string archivePath)
     assert(matchFirst(lines[4], line2));
     assert(matchFirst(lines[5], line3));
 
-    const archiveShell = escapeShellFileName(archivePath);
-
     auto sha1sumFile(string filename)
     {
-        const fileShell = escapeShellFileName(filename);
-        return executeShell("unzip -p " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+        return sha1sumProcessStdout(["unzip", "-p", archivePath, filename]);
     }
 
-    res = sha1sumFile("file1.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
+    auto sha1 = sha1sumFile("file1.txt");
+    assert(sha1 == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
 
-    res = sha1sumFile("file 2.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
+    sha1 = sha1sumFile("file 2.txt");
+    assert(sha1 == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
 
-    res = sha1sumFile("folder/chmod 666.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+    sha1 = sha1sumFile("folder/chmod 666.txt");
+    assert(sha1 == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
 }
 
 void testExtractedFiles(DM)(auto ref DM dm, Flag!"mode666" mode666)
