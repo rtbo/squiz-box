@@ -20,7 +20,8 @@ struct TarAlgo
         return TarBox!I(entries, chunkSize);
     }
 
-    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+            if (isByteRange!I)
     {
         auto dataInput = new ByteRangeCursor!I(input);
         return TarUnbox(dataInput, removePrefix);
@@ -39,7 +40,8 @@ struct TarGzAlgo
         return TarBox!I(entries, chunkSize).deflateGz(chunkSize);
     }
 
-    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+            if (isByteRange!I)
     {
         auto ii = input.inflateGz();
         alias II = typeof(ii);
@@ -62,7 +64,8 @@ version (HaveSquizBzip2)
             return TarBox!I(entries, chunkSize).compressBzip2(chunkSize);
         }
 
-        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+                if (isByteRange!I)
         {
             auto ii = input.decompressBzip2();
             alias II = typeof(ii);
@@ -86,7 +89,8 @@ version (HaveSquizLzma)
             return TarBox!I(entries, chunkSize).compressXz(chunkSize);
         }
 
-        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+        auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+                if (isByteRange!I)
         {
             auto ii = input.decompressXz();
             alias II = typeof(ii);
@@ -133,7 +137,8 @@ version (HaveSquizLzma)
 }
 
 /// Returns a range of entries from a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` formatted byte range
-auto unboxTar(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+auto unboxTar(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+        if (isByteRange!I)
 {
     auto dataInput = new ByteRangeCursor!I(input);
     return TarUnbox(dataInput, removePrefix);
