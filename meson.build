@@ -80,5 +80,7 @@ if get_option('enable_test')
         d_module_versions: squiz_ver,
     )
 
-    test('unit tests', squiz_test_exe)
+    test('unit tests', squiz_test_exe,
+        timeout: 120,
+    )
 endif
