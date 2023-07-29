@@ -305,9 +305,8 @@ private struct TarUnbox
         _removePrefix = removePrefix;
         _block = new ubyte[512];
 
-        // file with zero bytes is a valid tar file
         if (!_input.eoi)
-            readHeaderBlock();
+            popFront();
     }
 
     @property bool empty()
@@ -324,6 +323,8 @@ private struct TarUnbox
     {
         assert(_input.pos <= _next);
 
+        _entry = null;
+
         if (_input.pos < _next)
         {
             // the current entry was not fully read, we move the stream forward
@@ -331,15 +332,46 @@ private struct TarUnbox
             const dist = _next - _input.pos;
             _input.ffw(dist);
         }
-        readHeaderBlock();
+
+        auto info = readHeaderBlock();
+
+        if (info.isNull)
+        {
+            while (!_input.eoi)
+                _input.ffw(512);
+            return;
+        }
+
+        if (_removePrefix)
+        {
+            import std.algorithm : min;
+
+            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(
+                    info.path));
+
+            if (!_prefix)
+                _prefix = pref;
+
+            enforce(_prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, _prefix));
+
+            const len = min(info.path.length, _prefix.length);
+            info.path = info.path[len .. $];
+
+            // skipping empty directory
+            if (!info.path.length && info.type == EntryType.directory)
+            {
+                _next = next512(_input.pos + info.size);
+                info = readHeaderBlock();
+            }
+        }
+
+        _entry = new TarUnboxEntry(_input, info);
+        _next = next512(_input.pos + info.size);
     }
 
-    private void readHeaderBlock()
+    private TarEntryInfo readHeaderBlock()
     {
-        import std.conv : to;
-
         enforce(_input.read(_block).length == 512, "Unexpected end of input");
-
         TarHeader* th = cast(TarHeader*) _block.ptr;
 
         const computed = th.unsignedChecksum();
@@ -350,38 +382,57 @@ private struct TarUnbox
             // this is an empty header (only zeros)
             // indicates end of archive
 
-            while (!_input.eoi)
-            {
-                _input.ffw(512);
-            }
-            return;
+            // dfmt off
+            TarEntryInfo info = {
+                isNull: true,
+            };
+            // dfmt on
+            return info;
         }
 
         enforce(
             checksum == computed,
-            "Invalid TAR checksum at 0x" ~ (
-                _input.pos - 512 + th.chksum.offsetof)
-                .to!string(16) ~
-                "\nExpected " ~ computed.to!string ~ " but found " ~ checksum.to!string,
+            format!"Invalid TAR checksum at 0x%08X\nExpected 0x%08x but found 0x%08x"(
+                _input.pos - 512 + th.chksum.offsetof,
+                computed, checksum)
         );
 
-        if (th.typeflag == Typeflag.posixExtended || th.typeflag == Typeflag.extended)
+        switch (th.typeflag)
         {
-            // skipping extended Tar headers
-            const sz = next512(parseOctalString!size_t(th.size));
-            _input.ffw(sz);
-            readHeaderBlock();
-            return;
+        case Typeflag.normalNul:
+        case Typeflag.normal:
+        case Typeflag.hardLink:
+        case Typeflag.symLink:
+        case Typeflag.charSpecial:
+        case Typeflag.blockSpecial:
+        case Typeflag.directory:
+        case Typeflag.fifo:
+        case Typeflag.contiguousFile:
+        case Typeflag.posixExtended:
+        case Typeflag.extended:
+            return processHeader(th);
+        default:
+            const prefix = parseString(th.prefix).idup;
+            const name = parseString(th.name).idup;
+            const msg = format!"Unknown TAR typeflag: '%s'\nWhen extracting \"%s\"."(
+                cast(char)th.typeflag, prefix ~ name
+            );
+            throw new Exception(msg);
         }
+    }
 
-        TarEntryInfo info;
-        info.path = (parseString(th.prefix) ~ parseString(th.name)).idup;
-        info.type = toEntryType(th.typeflag);
-        info.linkname = parseString(th.linkname).idup;
-        info.size = parseOctalString!size_t(th.size);
+    private TarEntryInfo processHeader(scope TarHeader* th)
+    {
+        TarEntryInfo info = {
+            path: (parseString(th.prefix) ~ parseString(th.name)).idup,
+            type: toEntryType(th.typeflag),
+            linkname: parseString(th.linkname).idup,
+            size: parseOctalString!size_t(th.size),
+            timeLastModified: SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime))),
+        };
         info.entrySize = 512 + next512(info.size);
-        info.timeLastModified = SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime)));
-        version (Posix)
+
+        version(Posix)
         {
             // tar mode contains stat.st_mode & 07777.
             // we have to add the missing flags corresponding to file type
@@ -395,30 +446,7 @@ private struct TarUnbox
         version (Windows)
             info.path = info.path.replace('\\', '/');
 
-        if (_removePrefix)
-        {
-            import std.algorithm : min;
-
-            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(info.path));
-
-            if (!_prefix)
-                _prefix = pref;
-
-            enforce (_prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, _prefix));
-
-            const len = min(info.path.length, _prefix.length);
-            info.path = info.path[len .. $];
-
-            // skipping empty directory
-            if (!info.path.length && info.type == EntryType.directory)
-            {
-                _next = next512(_input.pos + info.size);
-                readHeaderBlock();
-            }
-        }
-
-        _entry = new TarUnboxEntry(_input, info);
-        _next = next512(_input.pos + info.size);
+        return info;
     }
 }
 
@@ -439,6 +467,9 @@ struct TarEntryInfo
         int ownerId;
         int groupId;
     }
+
+    // marker for null header
+    bool isNull;
 }
 
 private class TarUnboxEntry : UnboxEntry
