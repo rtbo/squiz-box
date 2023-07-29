@@ -3,9 +3,10 @@ module test.archive;
 import test.util;
 import squiz_box;
 
-import std.typecons;
 import std.digest;
 import std.digest.sha;
+import std.stdio;
+import std.typecons;
 
 string[] filesForArchive()
 {
@@ -23,6 +24,12 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
     import std.process : execute;
     import std.regex : matchFirst;
     import std.string : splitLines;
+
+    if (!findProgram("tar"))
+    {
+        stderr.writeln("tar not found: skipping assertions");
+        return;
+    }
 
     if (testModes)
     {
@@ -69,6 +76,12 @@ void testZipArchiveContent(string archivePath)
     import std.process : execute, executeShell, escapeShellFileName;
     import std.regex : matchFirst;
     import std.string : splitLines;
+
+    if (!findProgram("unzip"))
+    {
+        stderr.writeln("unzip not found: skipping assertions");
+        return;
+    }
 
     const line1 = `^\s*7\s.+file1.txt$`;
     const line2 = `^\s*3521\s.+file 2.txt$`;
