@@ -294,7 +294,6 @@ private struct TarUnbox
 
     // current header data
     private size_t _next;
-    private ubyte[] _block;
     private UnboxEntry _entry;
     private Flag!"removePrefix" _removePrefix;
     private string _prefix;
@@ -303,7 +302,6 @@ private struct TarUnbox
     {
         _input = input;
         _removePrefix = removePrefix;
-        _block = new ubyte[512];
 
         if (!_input.eoi)
             popFront();
@@ -344,24 +342,13 @@ private struct TarUnbox
 
         if (_removePrefix)
         {
-            import std.algorithm : min;
-
-            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(
-                    info.path));
-
-            if (!_prefix)
-                _prefix = pref;
-
-            enforce(_prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, _prefix));
-
-            const len = min(info.path.length, _prefix.length);
-            info.path = info.path[len .. $];
+            info.name = removePrefix(info.name, info.type);
 
             // skipping empty directory
-            if (!info.path.length && info.type == EntryType.directory)
+            while (!info.name.length && info.type == EntryType.directory)
             {
-                _next = next512(_input.pos + info.size);
                 info = readHeaderBlock();
+                info.name = removePrefix(info.name, info.type);
             }
         }
 
@@ -369,10 +356,28 @@ private struct TarUnbox
         _next = next512(_input.pos + info.size);
     }
 
+    private string removePrefix(string name, EntryType type)
+    {
+        import std.algorithm : min;
+
+        const pref = enforce(entryPrefix(name, type), format!`"%s": no prefix to be removed`(
+                name));
+
+        if (!_prefix)
+            _prefix = pref;
+
+        enforce(_prefix == pref, format!`"%s": path prefix mismatch with "%s"`(name, _prefix));
+
+        const len = min(name.length, _prefix.length);
+        name = name[len .. $];
+
+        return name;
+    }
+
     private TarEntryInfo readHeaderBlock()
     {
-        enforce(_input.read(_block).length == 512, "Unexpected end of input");
-        TarHeader* th = cast(TarHeader*) _block.ptr;
+        TarHeader th;
+        _input.readValue(&th);
 
         const computed = th.unsignedChecksum();
         const checksum = parseOctalString(th.chksum);
@@ -410,12 +415,15 @@ private struct TarUnbox
         case Typeflag.contiguousFile:
         case Typeflag.posixExtended:
         case Typeflag.extended:
-            return processHeader(th);
+            return processHeader(&th);
+        case Typeflag.gnuLongname:
+        case Typeflag.gnuLonglink:
+            return processGnuLongHeader(&th);
         default:
             const prefix = parseString(th.prefix).idup;
             const name = parseString(th.name).idup;
             const msg = format!"Unknown TAR typeflag: '%s'\nWhen extracting \"%s\"."(
-                cast(char)th.typeflag, prefix ~ name
+                cast(char) th.typeflag, prefix ~ "/" ~ name
             );
             throw new Exception(msg);
         }
@@ -424,7 +432,7 @@ private struct TarUnbox
     private TarEntryInfo processHeader(scope TarHeader* th)
     {
         TarEntryInfo info = {
-            path: (parseString(th.prefix) ~ parseString(th.name)).idup,
+            name: parseString(th.name).idup,
             type: toEntryType(th.typeflag),
             linkname: parseString(th.linkname).idup,
             size: parseOctalString!size_t(th.size),
@@ -432,7 +440,7 @@ private struct TarUnbox
         };
         info.entrySize = 512 + next512(info.size);
 
-        version(Posix)
+        version (Posix)
         {
             // tar mode contains stat.st_mode & 07777.
             // we have to add the missing flags corresponding to file type
@@ -443,10 +451,45 @@ private struct TarUnbox
             info.groupId = parseOctalString(th.gid);
         }
 
+        if (th.prefix[0] != '\0')
+        {
+            const prefix = parseString(th.prefix).idup;
+            info.name = prefix ~ "/" ~ info.name;
+        }
+
         version (Windows)
-            info.path = info.path.replace('\\', '/');
+        {
+            info.name = info.name.replace('\\', '/');
+        }
 
         return info;
+    }
+
+    private TarEntryInfo processGnuLongHeader(scope TarHeader* th)
+    {
+        const size = parseOctalString(th.size);
+        auto data = new char[next512(size)];
+        enforce(_input.read(data).length == data.length, "Unexpected end of input");
+        const name = parseString(assumeUnique(data));
+
+        auto next = readHeaderBlock();
+
+        switch (th.typeflag)
+        {
+        case Typeflag.gnuLongname:
+            next.name = name;
+            break;
+        case Typeflag.gnuLonglink:
+            next.linkname = name;
+            break;
+        default:
+            assert(false);
+        }
+
+        if (next.type == EntryType.directory && !next.name.empty && next.name[$ - 1] == '/')
+            next.name = next.name[0 .. $ - 1];
+
+        return next;
     }
 }
 
@@ -454,7 +497,7 @@ static assert(isUnboxEntryRange!TarUnbox);
 
 struct TarEntryInfo
 {
-    string path;
+    string name;
     string linkname;
     EntryType type;
     ulong size;
@@ -496,7 +539,7 @@ private class TarUnboxEntry : UnboxEntry
 
     @property string path()
     {
-        return _info.path;
+        return _info.name;
     }
 
     @property EntryType type()
@@ -699,6 +742,8 @@ private enum Typeflag : ubyte
     contiguousFile = '7',
     posixExtended = 'g',
     extended = 'x',
+    gnuLongname = 'L',
+    gnuLonglink = 'K',
 }
 
 Typeflag toTypeflag(EntryType type)
@@ -795,12 +840,12 @@ private T parseOctalString(T = uint)(const(char)[] octal)
     return parse!(T)(src, 8);
 }
 
-private char[] parseString(char[] chars)
+private inout(char)[] parseString(inout(char)[] chars)
 {
-    import core.stdc.string : strlen;
-
-    const len = strlen(chars.ptr);
-    return chars[0 .. len];
+    size_t count;
+    while (count < chars.length && chars[count] != '\0')
+        count++;
+    return chars[0 .. count];
 }
 
 private size_t next512(size_t off)
