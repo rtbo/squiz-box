@@ -75,7 +75,7 @@ interface Cursor
 
     T[] read(T)(T[] buffer)
     {
-        auto ptr = cast(ubyte)&buffer[0];
+        auto ptr = cast(ubyte*)&buffer[0];
         auto arr = ptr[0 .. buffer.length * T.sizeof];
         auto res = read(arr);
         enforce(res.length % T.sizeof == 0, "Could not read aligned bytes for " ~ T.stringof);
