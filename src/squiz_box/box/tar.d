@@ -168,6 +168,60 @@ version (HaveSquizLzma)
     }
 }
 
+/// Splits long name into prefix and shorter name if it the name exceeds
+/// the length of the tar header name field.
+/// If the name is longer than prefix + name fields length, name is returned
+/// unchanged.
+/// On Windows, the path must be converted to Posix path (with '/' separator)
+/// Returns: [prefix, name]
+private string[2] splitPosixPrefixName(string name)
+{
+    if (name.length < TarHeader.name.sizeof)
+        return [null, name];
+    if (name.length > TarHeader.name.sizeof + TarHeader.prefix.sizeof)
+        return [null, name];
+
+    foreach (i; 0 .. name.length)
+    {
+        if (name[i] == '/')
+        {
+            const p = name[0 .. i + 1];
+            const n = name[i + 1 .. $];
+            if (p.length <= TarHeader.prefix.sizeof && n.length <= TarHeader.name.sizeof)
+                return [p, n];
+        }
+    }
+
+    return [null, name];
+}
+
+@("tar.splitPosixPrefixName")
+unittest
+{
+    import unit_threaded.assertions;
+
+    enum shortPath = "some/short/path";
+    enum veryLongPath = "some/very/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/long/long/long/long/long/path";
+
+    enum longPath = "some/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/path";
+    enum longPrefix = "some/long/long/long/long/long/long/";
+    enum longName = "long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
+        ~ "/long/long/long/long/path";
+
+    static assert(veryLongPath.length > 255);
+    static assert(longPath.length > 100);
+    static assert(longPath.length < 155);
+
+    splitPosixPrefixName(shortPath).should == [null, shortPath];
+    splitPosixPrefixName(veryLongPath).should == [null, veryLongPath];
+    splitPosixPrefixName(longPath).should == [longPrefix, longName];
+}
+
 private struct TarBox(I)
 {
     // init data
@@ -842,6 +896,7 @@ private T parseOctalString(T = uint)(const(char)[] octal)
 
 private inout(char)[] parseString(inout(char)[] chars)
 {
+    // function similar to strnlen, but operate on slices.
     size_t count;
     while (count < chars.length && chars[count] != '\0')
         count++;
