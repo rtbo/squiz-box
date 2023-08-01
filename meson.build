@@ -65,6 +65,11 @@ squiz_dep = declare_dependency(
 )
 
 if get_option('enable_test')
+    ut_assertions_dep = dependency('unit-threaded:assertions',
+        method: 'dub',
+        version: '2.0.3',
+    )
+
     squiz_test_src = squiz_src + files([
         'test/archive.d',
         'test/compress.d',
@@ -72,11 +77,23 @@ if get_option('enable_test')
         'test/util.d',
     ])
 
-    squiz_test_exe = executable('squiz-test', squiz_test_src,
+    stupid_gen_exe = executable('stupid_gen', 'tools/stupid_gen.d',
+        d_import_dirs: include_directories('tools'),
+    )
+    squiz_stupid = custom_target('dop_stupid',
+       capture: true,
+        output: 'stupid.d',
+        input: squiz_test_src,
+        command: [
+            stupid_gen_exe, '@INPUT@',
+        ],
+    )
+
+    squiz_test_exe = executable('squiz-test', squiz_stupid, squiz_test_src,
         d_unittest: true,
         install: false,
         include_directories: squiz_inc,
-        dependencies: squiz_deps,
+        dependencies: squiz_deps + [ut_assertions_dep],
         d_module_versions: squiz_ver,
     )
 
