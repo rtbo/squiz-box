@@ -39,8 +39,20 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
             `^-rw-rw-rw- .+ 26 .+ folder.+chmod 666.txt$`
             : `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
 
-        auto res = execute(["tar", "-tvf", archivePath]);
+        auto res = execute(["tar", "-tvf", archivePath], ["MM_CHARSET":"UTF-8"]);
         assert(res.status == 0);
+
+        version (Windows)
+        {
+            import std.encoding : transcode;
+
+            // some tar versions of windows use Latin1 encoding
+            dchar[] buf;
+            foreach (char c; res.output)
+                buf ~= cast(dchar)c;
+            transcode(buf, res.output);
+        }
+
         const lines = res.output.splitLines();
         assert(lines.length == 3);
         assert(matchFirst(lines[0], line1));
@@ -413,6 +425,29 @@ version (HaveSquizLzma)
 
         testExtractedFiles(dm, Yes.mode666);
     }
+
+    // @("unbox gnulong tar #17")
+    // unittest
+    // {
+    //     import std.net.curl : byChunkAsync;
+    //     import std.algorithm : each;
+    //     import std.file : mkdir;
+    //     import std.range : inputRangeObject;
+
+    //     //const url = "https://ziglang.org/builds/zig-linux-x86_64-0.11.0-dev.4187+1ae839cd2.tar.xz";
+
+    //     //const archiveBytes = byChunkAsync(url);
+    //     const filename = testPath("data/zig-linux-x86_64-0.11.0-dev.4187+1ae839cd2.tar.xz");
+    //     const dm = DontDeleteMe("extraction_site", null);
+    //     mkdir(dm.path);
+
+    //     auto algo = boxAlgo(filename);
+
+    //     auto entries = readBinaryFile(filename)
+    //         .unbox(algo, Yes.removePrefix);
+
+    //     entries.each!((e) { stdout.writeln(e.path); e.extractTo(dm.path); });
+    // }
 }
 
 @("Extract squiz-box.zip")
