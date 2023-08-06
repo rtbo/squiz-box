@@ -63,7 +63,7 @@ interface Cursor
     /// Read T.sizeof data and returns it as a T.
     /// Similar to getValue!T but the value is passed as pointer to be filled in.
     /// Prefer this form for greater values (e.g. dozens of bytes)
-    void readValue(T)(T* val) if (!isDynamicArray!T)
+    void readValue(T)(scope T* val) if (!isDynamicArray!T)
     {
         import std.exception : enforce;
 
