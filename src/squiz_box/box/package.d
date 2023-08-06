@@ -270,7 +270,7 @@ interface ArchiveEntry
         import std.path : buildNormalizedPath, isAbsolute;
         import std.string : startsWith;
 
-        if (allowedSz != ulong.max && size > allowedSz)
+        if (size > allowedSz)
             return true;
 
         const p = path;
