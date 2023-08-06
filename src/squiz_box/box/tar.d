@@ -714,9 +714,9 @@ private struct TarHeader
             const uid = file.ownerId;
             const gid = file.groupId;
 
-            toOctalString(file.attributes & octal!7777, th.mode[0 .. $ - 1]);
-            toOctalString(uid, th.uid[0 .. $ - 1]);
-            toOctalString(gid, th.gid[0 .. $ - 1]);
+            toOctalString(file.attributes & octal!7777, th.mode[]);
+            toOctalString(uid, th.uid[]);
+            toOctalString(gid, th.gid[]);
 
             if (uid != 0)
             {
@@ -744,16 +744,16 @@ private struct TarHeader
             // TODO: https://docs.microsoft.com/fr-fr/windows/win32/secauthz/finding-the-owner-of-a-file-object-in-c--
         }
 
-        toOctalString(file.size, th.size[0 .. $ - 1]);
+        toOctalString(file.size, th.size[]);
         const mtime = file.timeLastModified().toUnixTime!long();
-        toOctalString(mtime, th.mtime[0 .. $ - 1]);
+        toOctalString(mtime, th.mtime[]);
 
         th.magic = "ustar\0";
         th.version_ = "00";
 
         const chksum = th.unsignedChecksum();
 
-        toOctalString(chksum, th.chksum[0 .. $ - 1]);
+        toOctalString(chksum, th.chksum[]);
 
         return block[512 .. $];
     }
@@ -875,7 +875,8 @@ private void toOctalString(T)(T val, char[] buf)
 {
     import std.format : sformat;
 
-    sformat(buf, "%0*o", buf.length, val);
+    sformat(buf[0 .. $ - 1], "%0*o", buf.length - 1, val);
+    buf[$ - 1] = '\0';
 }
 
 private T parseOctalString(T = uint)(const(char)[] octal)
