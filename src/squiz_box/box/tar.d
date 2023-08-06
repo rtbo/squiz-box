@@ -166,6 +166,7 @@ private:
 
 enum blockLen = 512;
 enum nameLen = 100;
+enum unameLen = 32;
 enum prefixLen = 155;
 
 enum char[8] posixMagic = "ustar\x0000";
@@ -186,8 +187,8 @@ struct BlockInfo
         Typeflag            typeflag;   // 156   9C
         char [nameLen]      linkname;   // 157   9D
         char [8]            magic;      // 257  101
-        char [32]           uname;      // 265  109
-        char [32]           gname;      // 297  129
+        char [unameLen]     uname;      // 265  109
+        char [unameLen]     gname;      // 297  129
         char [8]            devmajor;   // 329  149
         char [8]            devminor;   // 337  151
         char [prefixLen]    prefix;     // 345  159
@@ -233,6 +234,8 @@ struct BlockInfo
     int devminor;
     string prefix;
 
+    bool isNull;
+
     size_t encode(scope ubyte[] buffer) const
     in (buffer.length >= Block.sizeof)
     in (name.length <= Block.name.sizeof)
@@ -241,12 +244,16 @@ struct BlockInfo
     in (gname.length <= Block.gname.sizeof)
     in (prefix.length <= Block.prefix.sizeof)
     {
-        buffer[0 .. Block.sizeof] = 0;
+        buffer[0 .. blockLen] = 0;
+        if (isNull)
+            return blockLen;
+
         Block* blk = cast(Block*)&buffer[0];
 
         blk.name[0 .. name.length] = name;
         toOctalString(mode, blk.mode[]);
         toOctalString(uid, blk.uid[]);
+        toOctalString(gid, blk.gid[]);
         toOctalString(size, blk.size[]);
         toOctalString(mtime, blk.mtime[]);
         blk.typeflag = typeflag;
@@ -262,6 +269,53 @@ struct BlockInfo
         toOctalString(checksum, blk.chksum[]);
 
         return blockLen;
+    }
+
+    static BlockInfo decode(Cursor cursor)
+    {
+        Block blk = void;
+        cursor.readValue(&blk);
+
+        const computed = blk.checksum();
+        const checksum = parseOctalString!uint(blk.chksum);
+        if (computed == 256 && checksum == 0)
+        {
+            // this is an empty header (only zeros)
+            // indicates end of archive
+
+            // dfmt off
+            BlockInfo info = {
+                isNull: true,
+            };
+            // dfmt on
+            return info;
+        }
+
+        enforce(
+            checksum == computed,
+            format!"Invalid TAR checksum at 0x%08X\nExpected 0x%08x but found 0x%08x"(
+                cursor.pos - blockLen + blk.chksum.offsetof,
+                computed, checksum)
+        );
+
+        BlockInfo info = {
+            name: parseString(blk.name).idup,
+            mode: parseOctalString!uint(blk.mode),
+            uid: parseOctalString!uint(blk.uid),
+            gid: parseOctalString!uint(blk.uid),
+            size: parseOctalString!size_t(blk.size),
+            mtime: parseOctalString!long(blk.mtime),
+            typeflag: blk.typeflag,
+            linkname: parseString(blk.linkname).idup,
+            magic: blk.magic,
+            uname: parseString(blk.uname).idup,
+            gname: parseString(blk.gname).idup,
+            devmajor: parseOctalString!int(blk.devmajor),
+            devminor: parseOctalString!int(blk.devminor),
+            prefix: parseString(blk.prefix).idup,
+        };
+
+        return info;
     }
 }
 
@@ -293,7 +347,7 @@ size_t encodeLongGnu(ref ubyte[] buffer, size_t offset, string name, Typeflag ty
 struct TarHeader2
 {
     string name;
-    uint attributes;
+    uint mode;
     int uid;
     int gid;
     size_t size;
@@ -305,11 +359,21 @@ struct TarHeader2
     int devmajor;
     int devminor;
 
+    size_t entrySize;
+    bool isNull;
+
     // encode this header in buffer, starting at offset
     // buffer can potentially be grown if too small
     size_t encode(ref ubyte[] buffer, size_t offset)
     {
         import std.string : representation;
+
+        if (isNull)
+        {
+            buffer.ensureLen(offset + blockLen);
+            buffer[offset .. offset + blockLen] = 0;
+            return blockLen;
+        }
 
         size_t encoded;
 
@@ -340,13 +404,14 @@ struct TarHeader2
 
         BlockInfo blk = {
             name: nm,
-            mode: attributes,
+            mode: mode,
             uid: uid,
             gid: gid,
             size: size,
             mtime: mtime.toUnixTime(),
             linkname: lk,
             typeflag: toTypeflag(type),
+            magic: posixMagic,
             uname: uname,
             gname: gname,
             devmajor: devmajor,
@@ -356,6 +421,109 @@ struct TarHeader2
         return encoded + blk.encode(buffer[offset + encoded .. $]);
     }
 
+    static TarHeader2 decode(Cursor cursor)
+    {
+        auto blk = BlockInfo.decode(cursor);
+        if (blk.isNull)
+        {
+            TarHeader2 info = {entrySize: blockLen,
+            isNull: true,};
+            return info;
+        }
+
+        switch (blk.typeflag)
+        {
+        case Typeflag.normalNul:
+        case Typeflag.normal:
+        case Typeflag.hardLink:
+        case Typeflag.symLink:
+        case Typeflag.charSpecial:
+        case Typeflag.blockSpecial:
+        case Typeflag.directory:
+        case Typeflag.fifo:
+        case Typeflag.contiguousFile:
+        case Typeflag.posixExtended:
+        case Typeflag.extended:
+            return decodeHeader(blk);
+        case Typeflag.gnuLongname:
+        case Typeflag.gnuLonglink:
+            return decodeGnuLongHeader(cursor, blk);
+        default:
+            const msg = format!"Unknown TAR typeflag: '%s'\nWhen extracting \"%s\"."(
+                cast(char) blk.typeflag, blk.prefix ~ "/" ~ blk.name
+            );
+            throw new Exception(msg);
+        }
+    }
+
+    private static TarHeader2 decodeHeader(scope ref BlockInfo blk)
+    {
+        TarHeader2 info = {
+            name: blk.name,
+            mode: blk.mode,
+            uid: blk.uid,
+            gid: blk.gid,
+            size: blk.size,
+            mtime: SysTime(unixTimeToStdTime(blk.mtime)),
+            type: toEntryType(blk.typeflag),
+            linkname: blk.linkname,
+            uname: blk.uname,
+            gname: blk.gname,
+            devmajor: blk.devmajor,
+            devminor: blk.devminor,
+
+            entrySize: blockLen + next512(blk.size),
+            isNull: false,
+        };
+
+        if (blk.prefix.length != 0)
+        {
+            info.name = blk.prefix ~ "/" ~ blk.name;
+        }
+
+        version (Posix)
+        {
+            // tar mode contains stat.st_mode & 07777.
+            // we have to add the missing flags corresponding to file type
+            // (and by no way tar mode is meaningful on Windows)
+            const filetype = posixModeFileType(blk.typeflag);
+            info.mode |= filetype;
+        }
+        else version (Windows)
+        {
+            info.name = info.name.replace('\\', '/');
+            info.linkname = info.linkname.replace('\\', '/');
+        }
+
+        return info;
+    }
+
+    private static TarHeader2 decodeGnuLongHeader(Cursor cursor, scope ref BlockInfo blk)
+    {
+        auto data = new char[next512(blk.size)];
+        enforce(cursor.read(data).length == data.length, "Unexpected end of input");
+        const name = parseString(assumeUnique(data));
+
+        auto next = TarHeader2.decode(cursor);
+        next.entrySize += (blockLen + data.length);
+
+        switch (blk.typeflag)
+        {
+        case Typeflag.gnuLongname:
+            next.name = name;
+            break;
+        case Typeflag.gnuLonglink:
+            next.linkname = name;
+            break;
+        default:
+            assert(false);
+        }
+
+        if (next.type == EntryType.directory && !next.name.empty && next.name[$ - 1] == '/')
+            next.name = next.name[0 .. $ - 1];
+
+        return next;
+    }
 }
 
 /// Splits long name into prefix and shorter name if it the name exceeds
@@ -456,7 +624,7 @@ struct TarBox2(I)
     void popFront()
     {
         chunk = null;
-        scope(success)
+        scope (success)
         {
             written += chunk.length;
         }
@@ -506,9 +674,9 @@ struct TarBox2(I)
         if (!entryChunks.empty)
             entryChunk = entryChunks.front;
 
+        // common fields
         TarHeader2 header = {
             name: entry.path,
-            attributes: entry.attributes,
             size: entry.size,
             mtime: entry.timeLastModified,
             type: entry.type,
@@ -517,8 +685,43 @@ struct TarBox2(I)
 
         version (Posix)
         {
+            import core.sys.posix.grp;
+            import core.sys.posix.pwd;
+            import core.stdc.string : strlen;
+            import std.conv : octal;
+
+            char[512] buf;
+
+            header.mode = entry.attributes & octal!7777;
             header.uid = entry.ownerId;
             header.gid = entry.groupId;
+
+            if (header.uid != 0)
+            {
+                passwd pwdbuf;
+                passwd* pwd;
+                if (getpwuid_r(header.uid, &pwdbuf, buf.ptr, buf.length, &pwd) == 0)
+                {
+                    const len = min(strlen(pwd.pw_name), unameLen);
+                    header.uname = pwd.pw_name[0 .. len].idup;
+                }
+            }
+            if (header.gid != 0)
+            {
+                group grpbuf;
+                group* grp;
+                if (getgrgid_r(header.gid, &grpbuf, buf.ptr, buf.length, &grp) == 0)
+                {
+                    const len = min(strlen(grp.gr_name), unameLen);
+                    header.gname = grp.gr_name[0 .. len].idup;
+                }
+            }
+        }
+        else version (Windows)
+        {
+            // default to mode 644 which is the most common on UNIX
+            header.mode = "0000644";
+            // TODO: https://docs.microsoft.com/fr-fr/windows/win32/secauthz/finding-the-owner-of-a-file-object-in-c--
         }
 
         const len = header.encode(buffer, chunk.length);
@@ -604,7 +807,7 @@ struct TarBox2(I)
     {
         import std.algorithm : min;
 
-        const len = min (chunkSize - chunk.length, zeros);
+        const len = min(chunkSize - chunk.length, zeros);
         buffer[chunk.length .. chunk.length + len] = 0;
         chunk = buffer[0 .. chunk.length + len];
         return len;
@@ -784,7 +987,7 @@ private struct TarUnbox
             _input.ffw(dist);
         }
 
-        auto info = readHeaderBlock();
+        auto info = TarHeader2.decode(_input);
 
         if (info.isNull)
         {
@@ -800,7 +1003,7 @@ private struct TarUnbox
             // skipping empty directory
             while (!info.name.length && info.type == EntryType.directory)
             {
-                info = readHeaderBlock();
+                info = TarHeader2.decode(_input);
                 info.name = removePrefix(info.name, info.type);
             }
         }
@@ -825,124 +1028,6 @@ private struct TarUnbox
         name = name[len .. $];
 
         return name;
-    }
-
-    private TarEntryInfo readHeaderBlock()
-    {
-        TarHeader th;
-        _input.readValue(&th);
-
-        const computed = th.unsignedChecksum();
-        const checksum = parseOctalString(th.chksum);
-
-        if (computed == 256 && checksum == 0)
-        {
-            // this is an empty header (only zeros)
-            // indicates end of archive
-
-            // dfmt off
-            TarEntryInfo info = {
-                isNull: true,
-            };
-            // dfmt on
-            return info;
-        }
-
-        enforce(
-            checksum == computed,
-            format!"Invalid TAR checksum at 0x%08X\nExpected 0x%08x but found 0x%08x"(
-                _input.pos - 512 + th.chksum.offsetof,
-                computed, checksum)
-        );
-
-        switch (th.typeflag)
-        {
-        case Typeflag.normalNul:
-        case Typeflag.normal:
-        case Typeflag.hardLink:
-        case Typeflag.symLink:
-        case Typeflag.charSpecial:
-        case Typeflag.blockSpecial:
-        case Typeflag.directory:
-        case Typeflag.fifo:
-        case Typeflag.contiguousFile:
-        case Typeflag.posixExtended:
-        case Typeflag.extended:
-            return processHeader(&th);
-        case Typeflag.gnuLongname:
-        case Typeflag.gnuLonglink:
-            return processGnuLongHeader(&th);
-        default:
-            const prefix = parseString(th.prefix).idup;
-            const name = parseString(th.name).idup;
-            const msg = format!"Unknown TAR typeflag: '%s'\nWhen extracting \"%s\"."(
-                cast(char) th.typeflag, prefix ~ "/" ~ name
-            );
-            throw new Exception(msg);
-        }
-    }
-
-    private TarEntryInfo processHeader(scope TarHeader* th)
-    {
-        TarEntryInfo info = {
-            name: parseString(th.name).idup,
-            type: toEntryType(th.typeflag),
-            linkname: parseString(th.linkname).idup,
-            size: parseOctalString!size_t(th.size),
-            timeLastModified: SysTime(unixTimeToStdTime(parseOctalString!ulong(th.mtime))),
-        };
-        info.entrySize = 512 + next512(info.size);
-
-        version (Posix)
-        {
-            // tar mode contains stat.st_mode & 07777.
-            // we have to add the missing flags corresponding to file type
-            // (and by no way tar mode is meaningful on Windows)
-            const filetype = posixModeFileType(th.typeflag);
-            info.attributes = parseOctalString(th.mode) | filetype;
-            info.ownerId = parseOctalString(th.uid);
-            info.groupId = parseOctalString(th.gid);
-        }
-
-        if (th.prefix[0] != '\0')
-        {
-            const prefix = parseString(th.prefix).idup;
-            info.name = prefix ~ "/" ~ info.name;
-        }
-
-        version (Windows)
-        {
-            info.name = info.name.replace('\\', '/');
-        }
-
-        return info;
-    }
-
-    private TarEntryInfo processGnuLongHeader(scope TarHeader* th)
-    {
-        const size = parseOctalString(th.size);
-        auto data = new char[next512(size)];
-        enforce(_input.read(data).length == data.length, "Unexpected end of input");
-        const name = parseString(assumeUnique(data));
-
-        auto next = readHeaderBlock();
-
-        switch (th.typeflag)
-        {
-        case Typeflag.gnuLongname:
-            next.name = name;
-            break;
-        case Typeflag.gnuLonglink:
-            next.linkname = name;
-            break;
-        default:
-            assert(false);
-        }
-
-        if (next.type == EntryType.directory && !next.name.empty && next.name[$ - 1] == '/')
-            next.name = next.name[0 .. $ - 1];
-
-        return next;
     }
 }
 
@@ -975,9 +1060,9 @@ private class TarUnboxEntry : UnboxEntry
     private Cursor _input;
     private size_t _start;
     private size_t _end;
-    private TarEntryInfo _info;
+    private TarHeader2 _info;
 
-    this(Cursor input, TarEntryInfo info)
+    this(Cursor input, TarHeader2 info)
     {
         _input = input;
         _start = input.pos;
@@ -1017,24 +1102,24 @@ private class TarUnboxEntry : UnboxEntry
 
     @property SysTime timeLastModified()
     {
-        return _info.timeLastModified;
+        return _info.mtime;
     }
 
     @property uint attributes()
     {
-        return _info.attributes;
+        return _info.mode;
     }
 
     version (Posix)
     {
         @property int ownerId()
         {
-            return _info.ownerId;
+            return _info.uid;
         }
 
         @property int groupId()
         {
-            return _info.groupId;
+            return _info.gid;
         }
     }
 
