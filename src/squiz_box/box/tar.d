@@ -15,9 +15,8 @@ struct TarAlgo
 {
     auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
             if (isBoxEntryRange!I)
-    in (chunkSize >= 512 && chunkSize % 512 == 0)
     {
-        return TarBox!I(entries, chunkSize);
+        return TarBox2!I(entries, chunkSize);
     }
 
     auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
@@ -35,9 +34,8 @@ struct TarGzAlgo
 {
     auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
             if (isBoxEntryRange!I)
-    in (chunkSize >= 512 && chunkSize % 512 == 0)
     {
-        return TarBox!I(entries, chunkSize).deflateGz(chunkSize);
+        return TarBox2!I(entries, chunkSize).deflateGz(chunkSize);
     }
 
     auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
@@ -59,9 +57,8 @@ version (HaveSquizBzip2)
     {
         auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
                 if (isBoxEntryRange!I)
-        in (chunkSize >= 512 && chunkSize % 512 == 0)
         {
-            return TarBox!I(entries, chunkSize).compressBzip2(chunkSize);
+            return TarBox2!I(entries, chunkSize).compressBzip2(chunkSize);
         }
 
         auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
@@ -84,9 +81,8 @@ version (HaveSquizLzma)
     {
         auto box(I)(I entries, size_t chunkSize = defaultChunkSize)
                 if (isBoxEntryRange!I)
-        in (chunkSize >= 512 && chunkSize % 512 == 0)
         {
-            return TarBox!I(entries, chunkSize).compressXz(chunkSize);
+            return TarBox2!I(entries, chunkSize).compressXz(chunkSize);
         }
 
         auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
@@ -104,12 +100,10 @@ version (HaveSquizLzma)
 
 /// Returns a `.tar`, `.tar.gz`, `.tar.bz2` or `.tar.xz` archive as a byte range
 /// corresponding to the entries in input.
-/// chunkSize must be a multiple of 512.
 auto boxTar(I)(I entries, size_t chunkSize = defaultChunkSize)
         if (isBoxEntryRange!I)
-in (chunkSize >= 512 && chunkSize % 512 == 0)
 {
-    return TarBox!I(entries, chunkSize);
+    return TarBox2!I(entries, chunkSize);
 }
 
 /// ditto
@@ -168,26 +162,222 @@ version (HaveSquizLzma)
     }
 }
 
+private:
+
+enum blockLen = 512;
+enum nameLen = 100;
+enum prefixLen = 155;
+
+enum char[8] posixMagic = "ustar\x0000";
+enum char[8] gnuMagic = "ustar  \x00";
+
+struct BlockInfo
+{
+    static struct Block
+    {
+        // dfmt off
+        char [nameLen]      name;       //   0    0
+        char [8]            mode;       // 100   64
+        char [8]            uid;        // 108   6C
+        char [8]            gid;        // 116   74
+        char [12]           size;       // 124   7C
+        char [12]           mtime;      // 136   88
+        char [8]            chksum;     // 148   94
+        Typeflag            typeflag;   // 156   9C
+        char [nameLen]      linkname;   // 157   9D
+        char [8]            magic;      // 257  101
+        char [32]           uname;      // 265  109
+        char [32]           gname;      // 297  129
+        char [8]            devmajor;   // 329  149
+        char [8]            devminor;   // 337  151
+        char [prefixLen]    prefix;     // 345  159
+        char [12]           padding;    // 500  1F4
+        //dfmt on
+
+        private uint checksum()
+        {
+            uint sum = 0;
+            sum += unsignedSum(name);
+            sum += unsignedSum(mode);
+            sum += unsignedSum(uid);
+            sum += unsignedSum(gid);
+            sum += unsignedSum(size);
+            sum += unsignedSum(mtime);
+            sum += 32 * 8;
+            sum += cast(uint) typeflag;
+            sum += unsignedSum(linkname);
+            sum += unsignedSum(magic);
+            sum += unsignedSum(uname);
+            sum += unsignedSum(gname);
+            sum += unsignedSum(devmajor);
+            sum += unsignedSum(devminor);
+            sum += unsignedSum(prefix);
+            return sum;
+        }
+    }
+
+    static assert(Block.sizeof == blockLen);
+
+    string name;
+    uint mode;
+    int uid;
+    int gid;
+    size_t size;
+    long mtime;
+    Typeflag typeflag;
+    string linkname;
+    char[8] magic;
+    string uname;
+    string gname;
+    int devmajor;
+    int devminor;
+    string prefix;
+
+    size_t encode(scope ubyte[] buffer) const
+    in (buffer.length >= Block.sizeof)
+    in (name.length <= Block.name.sizeof)
+    in (linkname.length <= Block.linkname.sizeof)
+    in (uname.length <= Block.uname.sizeof)
+    in (gname.length <= Block.gname.sizeof)
+    in (prefix.length <= Block.prefix.sizeof)
+    {
+        buffer[0 .. Block.sizeof] = 0;
+        Block* blk = cast(Block*)&buffer[0];
+
+        blk.name[0 .. name.length] = name;
+        toOctalString(mode, blk.mode[]);
+        toOctalString(uid, blk.uid[]);
+        toOctalString(size, blk.size[]);
+        toOctalString(mtime, blk.mtime[]);
+        blk.typeflag = typeflag;
+        blk.linkname[0 .. linkname.length] = linkname;
+        blk.magic = magic;
+        blk.uname[0 .. uname.length] = uname;
+        blk.gname[0 .. gname.length] = gname;
+        toOctalString(devmajor, blk.devmajor[]);
+        toOctalString(devminor, blk.devminor[]);
+        blk.prefix[0 .. prefix.length] = prefix;
+
+        const checksum = blk.checksum();
+        toOctalString(checksum, blk.chksum[]);
+
+        return blockLen;
+    }
+}
+
+void ensureLen(ref ubyte[] buffer, size_t len)
+{
+    if (buffer.length < len)
+        buffer.length = len;
+}
+
+size_t encodeLongGnu(ref ubyte[] buffer, size_t offset, string name, Typeflag typeflag)
+{
+    const l512 = next512(name.length);
+    buffer.ensureLen(offset + blockLen + l512);
+
+    BlockInfo gnu = {
+        name: "././@LongLink",
+        size: name.length,
+        typeflag: Typeflag.gnuLongname,
+        magic: gnuMagic,
+    };
+    gnu.encode(buffer[offset .. $]);
+
+    buffer[blockLen .. blockLen + name.length] = name.representation;
+    buffer[blockLen + name.length .. blockLen + l512] = 0;
+
+    return blockLen + l512;
+}
+
+struct TarHeader2
+{
+    string name;
+    uint attributes;
+    int uid;
+    int gid;
+    size_t size;
+    SysTime mtime;
+    string linkname;
+    EntryType type;
+    string uname;
+    string gname;
+    int devmajor;
+    int devminor;
+
+    // encode this header in buffer, starting at offset
+    // buffer can potentially be grown if too small
+    size_t encode(ref ubyte[] buffer, size_t offset)
+    {
+        import std.string : representation;
+
+        size_t encoded;
+
+        string nm = name;
+        string lk = linkname;
+        string px;
+        if (nm.length > nameLen)
+        {
+            const pn = splitLongName(nm);
+            if (pn[0] != null)
+            {
+                px = pn[0];
+                nm = pn[1];
+            }
+            else
+            {
+                encoded += buffer.encodeLongGnu(offset + encoded, nm, Typeflag.gnuLongname);
+                nm = null;
+            }
+        }
+        if (lk.length > nameLen)
+        {
+            encoded += buffer.encodeLongGnu(offset + encoded, lk, Typeflag.gnuLonglink);
+            lk = null;
+        }
+
+        buffer.ensureLen(offset + encoded + blockLen);
+
+        BlockInfo blk = {
+            name: nm,
+            mode: attributes,
+            uid: uid,
+            gid: gid,
+            size: size,
+            mtime: mtime.toUnixTime(),
+            linkname: lk,
+            typeflag: toTypeflag(type),
+            uname: uname,
+            gname: gname,
+            devmajor: devmajor,
+            devminor: devminor,
+        };
+
+        return encoded + blk.encode(buffer[offset + encoded .. $]);
+    }
+
+}
+
 /// Splits long name into prefix and shorter name if it the name exceeds
 /// the length of the tar header name field.
 /// If the name is longer than prefix + name fields length, name is returned
 /// unchanged.
 /// On Windows, the path must be converted to Posix path (with '/' separator)
 /// Returns: [prefix, name]
-private string[2] splitPosixPrefixName(string name)
+string[2] splitLongName(string name)
 {
-    if (name.length < TarHeader.name.sizeof)
+    if (name.length < nameLen)
         return [null, name];
-    if (name.length > TarHeader.name.sizeof + TarHeader.prefix.sizeof)
+    if (name.length > nameLen + prefixLen)
         return [null, name];
 
     foreach (i; 0 .. name.length)
     {
         if (name[i] == '/')
         {
-            const p = name[0 .. i + 1];
+            const p = name[0 .. i];
             const n = name[i + 1 .. $];
-            if (p.length <= TarHeader.prefix.sizeof && n.length <= TarHeader.name.sizeof)
+            if (p.length <= prefixLen && n.length <= nameLen)
                 return [p, n];
         }
     }
@@ -195,7 +385,7 @@ private string[2] splitPosixPrefixName(string name)
     return [null, name];
 }
 
-@("tar.splitPosixPrefixName")
+@("tar.splitPrefixName")
 unittest
 {
     import unit_threaded.assertions;
@@ -209,7 +399,7 @@ unittest
 
     enum longPath = "some/long/long/long/long/long/long/long/long/long/long/long"
         ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/path";
-    enum longPrefix = "some/long/long/long/long/long/long/";
+    enum longPrefix = "some/long/long/long/long/long/long";
     enum longName = "long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
         ~ "/long/long/long/long/path";
 
@@ -217,10 +407,219 @@ unittest
     static assert(longPath.length > 100);
     static assert(longPath.length < 155);
 
-    splitPosixPrefixName(shortPath).should == [null, shortPath];
-    splitPosixPrefixName(veryLongPath).should == [null, veryLongPath];
-    splitPosixPrefixName(longPath).should == [longPrefix, longName];
+    splitLongName(shortPath).should == [null, shortPath];
+    splitLongName(veryLongPath).should == [null, veryLongPath];
+    splitLongName(longPath).should == [longPrefix, longName];
 }
+
+struct TarBox2(I)
+{
+    I entries;
+    size_t chunkSize;
+
+    size_t written;
+    ubyte[] buffer;
+    const(ubyte)[] chunk;
+
+    // current entry being processed
+    ubyte[] remainHeader;
+    BoxEntry entry;
+    ByteRange entryChunks;
+    const(ubyte)[] entryChunk;
+    size_t padSize;
+
+    // footer
+    size_t footerSize;
+
+    this(I entries, size_t chunkSize)
+    {
+        import std.algorithm : max;
+
+        this.entries = entries;
+        this.chunkSize = chunkSize;
+        this.buffer = new ubyte[max(512, chunkSize)];
+        this.footerSize = blockLen * 2;
+
+        popFront();
+    }
+
+    @property bool empty()
+    {
+        return chunk.length == 0;
+    }
+
+    @property ByteChunk front()
+    {
+        return chunk;
+    }
+
+    void popFront()
+    {
+        chunk = null;
+        scope(success)
+        {
+            written += chunk.length;
+        }
+
+        while (!remainHeader.empty || padSize != 0 || hasEntryChunks || !entries.empty)
+        {
+            if (nextRemainHeader())
+                return;
+
+            if (fillPad())
+                return;
+
+            if (nextEntryChunk())
+                return;
+
+            if (nextHeader())
+                return;
+        }
+
+        footerSize -= fillZeros(footerSize);
+    }
+
+    private size_t pos()
+    {
+        return written + chunk.length;
+    }
+
+    private bool hasEntryChunks()
+    {
+        return (entryChunks && !entryChunks.empty) || !entryChunk.empty;
+    }
+
+    private bool nextHeader()
+    {
+        import std.algorithm : min;
+
+        assert(chunk.length < chunkSize);
+        assert(remainHeader.empty);
+        assert(!hasEntryChunks);
+
+        if (entries.empty)
+            return false;
+
+        entry = entries.front;
+        entries.popFront();
+        entryChunks = entry.byChunk(chunkSize);
+        if (!entryChunks.empty)
+            entryChunk = entryChunks.front;
+
+        TarHeader2 header = {
+            name: entry.path,
+            attributes: entry.attributes,
+            size: entry.size,
+            mtime: entry.timeLastModified,
+            type: entry.type,
+            linkname: entry.linkname,
+        };
+
+        version (Posix)
+        {
+            header.uid = entry.ownerId;
+            header.gid = entry.groupId;
+        }
+
+        const len = header.encode(buffer, chunk.length);
+        assert(buffer.length >= chunk.length + len);
+
+        const chunkTo = min(chunk.length + len, chunkSize);
+        if (chunk.length + len > chunkSize)
+            remainHeader = buffer[chunkSize .. chunk.length + len];
+
+        chunk = buffer[0 .. chunkTo];
+        return chunkTo == chunkSize;
+    }
+
+    // fill chunk with what remains of previous header (if any)
+    private bool nextRemainHeader()
+    {
+        import std.algorithm : min;
+
+        if (remainHeader.empty)
+            return false;
+
+        if (chunk.empty && remainHeader.length > chunkSize)
+        {
+            chunk = remainHeader[0 .. chunkSize];
+            remainHeader = remainHeader[chunkSize .. $];
+            return true;
+        }
+
+        const len = min(chunkSize - chunk.length, remainHeader.length);
+        buffer[chunk.length .. chunk.length + len] = remainHeader[0 .. len];
+        remainHeader = remainHeader[len .. $];
+        chunk = buffer[0 .. chunk.length + len];
+
+        return chunk.length == chunkSize;
+    }
+
+    // fill chunk with next chunk of current entry
+    private bool nextEntryChunk()
+    {
+        import std.algorithm : min;
+
+        assert(chunk.length < chunkSize);
+        assert(padSize == 0);
+        assert(remainHeader.empty);
+
+        while (hasEntryChunks() && chunk.length < chunkSize)
+        {
+            if (entryChunk.empty)
+            {
+                entryChunks.popFront();
+                if (!entryChunks.empty)
+                    entryChunk = entryChunks.front;
+
+                if (entryChunk.empty)
+                    break;
+            }
+
+            if (chunk.empty && entryChunk.length >= chunkSize)
+            {
+                // can directly use entryChunk without copying
+                chunk = entryChunk[0 .. chunkSize];
+                entryChunk = entryChunk[chunkSize .. $];
+                break;
+            }
+
+            // copy slice into buffer
+            const len = min(chunkSize - chunk.length, entryChunk.length);
+            buffer[chunk.length .. chunk.length + len] = entryChunk[0 .. len];
+            chunk = buffer[0 .. chunk.length + len];
+            entryChunk = entryChunk[len .. $];
+        }
+
+        if (!hasEntryChunks())
+        {
+            padSize = next512(pos) - pos;
+            padSize -= fillZeros(padSize);
+        }
+
+        return chunk.length == chunkSize;
+    }
+
+    size_t fillZeros(size_t zeros)
+    {
+        import std.algorithm : min;
+
+        const len = min (chunkSize - chunk.length, zeros);
+        buffer[chunk.length .. chunk.length + len] = 0;
+        chunk = buffer[0 .. chunk.length + len];
+        return len;
+    }
+
+    bool fillPad()
+    {
+        if (padSize != 0)
+            padSize -= fillZeros(padSize);
+
+        return chunk.length == chunkSize;
+    }
+}
+
+static assert(isByteRange!(TarBox2!(BoxEntry[])));
 
 private struct TarBox(I)
 {
