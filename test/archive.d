@@ -454,32 +454,26 @@ version (HaveSquizLzma)
 unittest
 {
     import std.algorithm;
+    import std.net.curl : byChunk;
     import std.file;
-    import std.net.curl;
     import std.path;
-    import std.range;
     import std.stdio;
 
     const url = "https://github.com/rtbo/squiz-box/archive/refs/tags/v0.2.1.zip";
-
-    auto file = buildPath(tempDir(), "squiz-box-0.2.1.zip");
     auto dir = buildPath(tempDir(), "squiz-box-0.2.1");
 
-    download(url, file);
     mkdirRecurse(dir);
-
-    version (Posix)
+    scope (exit)
     {
-        scope (exit)
-            remove(file);
-        scope (exit)
-            rmdirRecurse(dir);
+        rmdirRecurse(dir);
     }
 
-    unboxZip(File(file, "rb"), Yes.removePrefix)
+    byChunk(url)
+        .unboxZip(Yes.removePrefix)
         .each!(e => e.extractTo(dir));
 
     assert(isFile(buildPath(dir, "meson.build")));
+    assert(isFile(buildPath(dir, "test", "archive.d")));
 }
 
 @("Extract 7z")
