@@ -454,7 +454,7 @@ version (HaveSquizLzma)
 unittest
 {
     import std.algorithm;
-    import std.net.curl : byChunk;
+    import std.net.curl : byChunk, CurlException;
     import std.file;
     import std.path;
     import std.stdio;
@@ -468,12 +468,17 @@ unittest
         rmdirRecurse(dir);
     }
 
-    byChunk(url)
-        .unboxZip(Yes.removePrefix)
-        .each!(e => e.extractTo(dir));
+    try
+    {
+        byChunk(url)
+            .unboxZip(Yes.removePrefix)
+            .each!(e => e.extractTo(dir));
 
-    assert(isFile(buildPath(dir, "meson.build")));
-    assert(isFile(buildPath(dir, "test", "archive.d")));
+        assert(isFile(buildPath(dir, "meson.build")));
+        assert(isFile(buildPath(dir, "test", "archive.d")));
+    }
+    catch (CurlException)
+    {}
 }
 
 @("Extract 7z")
