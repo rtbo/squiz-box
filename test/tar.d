@@ -47,8 +47,11 @@ unittest
     const filename = "long-path".repeat(55).join("/") ~ "/file.txt";
     const linkname = "long-path".repeat(55).join("/") ~ "/link.txt";
 
+    assert(filename.length > nameLen + prefixLen);
+    assert(linkname.length > nameLen + prefixLen);
+
     // dfmt off
-    const entries = only(
+    const tarData = only(
             infoEntry(BoxEntryInfo(
                 path: filename,
                 type: EntryType.regular,
@@ -63,10 +66,51 @@ unittest
                 attributes: octal!"100644",
             )))
         .boxTar()
-        .unboxTar()
-        .map!(e => tuple(e.path, e.type, e.linkname, e.size, cast(ByteChunk)e.readContent()))
-        .array;
+        .join();
     // dfmt on
+
+    //  0   file name block
+    //  1   file name data (x2)
+    //  3   file block
+    //  4   file data
+    //  5   link name block
+    //  6   link name data (x2)
+    //  8   link linkname block
+    //  9   link linkname data (x2)
+    //  11  link block
+    //  12  footer (x2)
+    assert(tarData.length == 14 * blockLen);
+
+    const(Block)* blk = cast(const(Block)*)&tarData[0];
+    assert(blk.typeflag == 'L');
+    assert(blk.magic == gnuMagic);
+    assert(tarData[blockLen .. $].startsWith(filename.representation));
+
+    blk = cast(const(Block)*)&tarData[3 * blockLen];
+    assert(blk.typeflag == '0');
+    assert(blk.magic == posixMagic);
+    assert(tarData[4 * blockLen .. $].startsWith(content));
+
+    blk = cast(const(Block)*)&tarData[5 * blockLen];
+    assert(blk.typeflag == 'L');
+    assert(blk.magic == gnuMagic);
+    assert(tarData[6 * blockLen .. $].startsWith(linkname.representation));
+
+    blk = cast(const(Block)*)&tarData[8 * blockLen];
+    assert(blk.typeflag == 'K');
+    assert(blk.magic == gnuMagic);
+    assert(tarData[9 * blockLen .. $].startsWith(filename.representation));
+
+    blk = cast(const(Block)*)&tarData[11 * blockLen];
+    assert(blk.typeflag == '2');
+    assert(blk.magic == posixMagic);
+
+    assert(tarData[14 * blockLen .. $].all!"a == 0");
+
+    const entries = only(tarData)
+        .unboxTar()
+        .map!(e => tuple(e.path, e.type, e.linkname, e.size, cast(ByteChunk) e.readContent()))
+        .array;
 
     assert(entries.length == 2);
     assert(entries[0] == tuple(
