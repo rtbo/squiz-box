@@ -495,6 +495,7 @@ struct TarInfo
             gname: gname,
             devmajor: devmajor,
             devminor: devminor,
+            prefix: px,
         };
 
         return encoded + blk.encode(buffer[offset + encoded .. $]);
@@ -651,6 +652,7 @@ unittest
     static assert(veryLongPath.length > 255);
     static assert(longPath.length > 100);
     static assert(longPath.length < 155);
+    static assert(longPrefix ~ "/" ~ longName == longPath);
 
     assert(splitLongName(shortPath) == [null, shortPath]);
     assert(splitLongName(veryLongPath) == [null, veryLongPath]);
