@@ -74,6 +74,7 @@ if get_option('enable_test')
         'test/archive.d',
         'test/compress.d',
         'test/main.d',
+        'test/tar.d',
         'test/util.d',
     ])
 

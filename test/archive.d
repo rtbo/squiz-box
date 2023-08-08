@@ -425,29 +425,6 @@ version (HaveSquizLzma)
 
         testExtractedFiles(dm, Yes.mode666);
     }
-
-    // @("unbox gnulong tar #17")
-    // unittest
-    // {
-    //     import std.net.curl : byChunkAsync;
-    //     import std.algorithm : each;
-    //     import std.file : mkdir;
-    //     import std.range : inputRangeObject;
-
-    //     //const url = "https://ziglang.org/builds/zig-linux-x86_64-0.11.0-dev.4187+1ae839cd2.tar.xz";
-
-    //     //const archiveBytes = byChunkAsync(url);
-    //     const filename = testPath("data/zig-linux-x86_64-0.11.0-dev.4187+1ae839cd2.tar.xz");
-    //     const dm = DontDeleteMe("extraction_site", null);
-    //     mkdir(dm.path);
-
-    //     auto algo = boxAlgo(filename);
-
-    //     auto entries = readBinaryFile(filename)
-    //         .unbox(algo, Yes.removePrefix);
-
-    //     entries.each!((e) { stdout.writeln(e.path); e.extractTo(dm.path); });
-    // }
 }
 
 @("Extract squiz-box.zip")
