@@ -444,6 +444,7 @@ struct TarInfo
     // buffer can potentially be grown if too small
     size_t encode(ref ubyte[] buffer, size_t offset)
     {
+        import std.algorithm : max;
         import std.string : representation;
 
         if (isNull)
@@ -486,7 +487,7 @@ struct TarInfo
             uid: uid,
             gid: gid,
             size: size,
-            mtime: mtime.toUnixTime(),
+            mtime: max(0, mtime.toUnixTime()),
             linkname: lk,
             typeflag: toTypeflag(type),
             magic: posixMagic,
