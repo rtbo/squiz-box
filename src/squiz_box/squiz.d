@@ -74,6 +74,20 @@ template isByteRange(BR)
 
 static assert(isByteRange!ByteRange);
 
+private struct EmptyByteRange
+{
+    enum bool empty = true;
+    enum const(ubyte)[] front = [];
+    void popFront()
+    {
+    }
+}
+
+static assert(isByteRange!EmptyByteRange);
+
+/// An empty range of bytes
+enum emptyByteRange = EmptyByteRange();
+
 /// Exception thrown when inconsistent data is given to
 /// a decompression algorithm.
 /// I.e. the data was not compressed with the corresponding algorithm
@@ -573,7 +587,7 @@ private struct Squiz(I, A, Flag!"endStream" endStream)
             const len = min(chunkBuffer.length - chunk.length, maxLen);
             stream.output = chunkBuffer[chunk.length .. chunk.length + len];
 
-            const streamEnded = algo.process(stream, cast(Flag!"lastChunk") (input.empty && lastInput));
+            const streamEnded = algo.process(stream, cast(Flag!"lastChunk")(input.empty && lastInput));
 
             chunk = chunkBuffer[0 .. $ - stream.output.length];
             maxLen -= len;
@@ -1157,7 +1171,7 @@ struct Inflate
         assert(
             (windowBits == 0 && format == ZlibFormat.zlib) ||
                 (9 <= windowBits && windowBits <= 15),
-                "inconsistent windowBits"
+            "inconsistent windowBits"
         );
         int wb = windowBits;
         final switch (format)
@@ -1460,7 +1474,7 @@ version (HaveSquizBzip2)
             enforce(
                 (action == BZ_RUN && res == BZ_RUN_OK) ||
                     (action == BZ_FINISH && res == BZ_FINISH_OK),
-                    "Bzip2 compress failed with code: " ~ bzResultToString(res)
+                "Bzip2 compress failed with code: " ~ bzResultToString(res)
             );
 
             return No.streamEnded;
