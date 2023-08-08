@@ -194,8 +194,9 @@ unittest
     }
     else
     {
-        const attr644 = 0;
-        const attr666 = 0;
+        import core.sys.windows.winnt : FILE_ATTRIBUTE_NORMAL;
+        const attr644 = FILE_ATTRIBUTE_NORMAL;
+        const attr666 = FILE_ATTRIBUTE_NORMAL;
     }
 
     const expectedEntries = [

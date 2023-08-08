@@ -215,11 +215,30 @@ EntryType toEntryType(Typeflag flag)
     }
 }
 
-version (Posix)
+/// Returns TAR permission bits from attributes (as per std.file.getAttributes)
+uint toTarMode(uint attributes)
 {
-    // stat.st_mode part corresponding to file type
-    uint posixModeFileType(Typeflag flag)
+    import std.conv : octal;
+
+    version(Posix)
     {
+        return attributes & octal!"7777";
+    }
+    else version(Windows)
+    {
+        // windows attributes are irrelevant to permission bits
+        return octal!"644";
+    }
+}
+
+/// Returns attributes with the same semantics as std.file.getAttributes
+/// flag is Block.typeflag and mode is octal translation of Block.mode
+uint toAttributes(Typeflag flag, uint mode)
+{
+    version (Posix)
+    {
+        // tar mode contains stat.st_mode & 07777.
+        // we have to add the missing flags corresponding to file type
         import std.conv : octal;
         import std.format : format;
 
@@ -227,29 +246,47 @@ version (Posix)
         {
         case Typeflag.normalNul:
         case Typeflag.normal:
-            return octal!100_000;
+            return mode | octal!100_000;
         case Typeflag.hardLink:
             // is regular file right for hard links?
-            return octal!100_000;
+            return mode | octal!100_000;
         case Typeflag.symLink:
-            return octal!120_000;
+            return mode | octal!120_000;
         case Typeflag.charSpecial:
-            return octal!20_000;
+            return mode | octal!20_000;
         case Typeflag.blockSpecial:
-            return octal!60_000;
+            return mode | octal!60_000;
         case Typeflag.directory:
-            return octal!40_000;
+            return mode | octal!40_000;
         case Typeflag.fifo:
-            return octal!10_000;
+            return mode | octal!10_000;
         case Typeflag.contiguousFile:
             // is regular file right for contiguous files?
-            return octal!100_000;
+            return mode | octal!100_000;
         default:
             throw new Exception(format!"Unexpected Tar entry type: '%s'"(cast(char) flag));
         }
     }
+    else version (Windows)
+    {
+        // the same values as win32 GetFileAttributes
+        // (mode permission bits are irrelevant)
+        import core.sys.windows.winnt : FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL;
+
+        switch (flag)
+        {
+        case Typeflag.normal:
+            return FILE_ATTRIBUTE_NORMAL;
+        case Typeflag.directory:
+            return FILE_ATTRIBUTE_DIRECTORY;
+        default:
+            // TODO: symbolic links in windows
+            return 0;
+        }
+    }
 }
 
+/// BlockInfo contains info for one 512 byte TAR block
 struct BlockInfo
 {
     static struct Block
@@ -422,12 +459,13 @@ size_t encodeLongGnu(ref ubyte[] buffer, size_t offset, string name, Typeflag ty
     return blockLen + l512;
 }
 
+/// TarInfo contains info for one TAR header, which is one or more TAR blocks
 struct TarInfo
 {
     string name;
-    uint mode;
-    int uid;
-    int gid;
+    uint attributes;
+    int ownerId;
+    int groupId;
     size_t size;
     SysTime mtime;
     string linkname;
@@ -483,9 +521,9 @@ struct TarInfo
 
         BlockInfo blk = {
             name: nm,
-            mode: mode,
-            uid: uid,
-            gid: gid,
+            mode: toTarMode(attributes),
+            uid: ownerId,
+            gid: groupId,
             size: size,
             mtime: max(0, mtime.toUnixTime()),
             linkname: lk,
@@ -506,8 +544,12 @@ struct TarInfo
         auto blk = BlockInfo.decode(cursor);
         if (blk.isNull)
         {
-            TarInfo info = {entrySize: blockLen,
-            isNull: true,};
+            // dfmt off
+            TarInfo info = {
+                entrySize: blockLen,
+                isNull: true,
+            };
+            // dfmt on
             return info;
         }
 
@@ -540,9 +582,9 @@ struct TarInfo
     {
         TarInfo info = {
             name: blk.name,
-            mode: blk.mode,
-            uid: blk.uid,
-            gid: blk.gid,
+            attributes: toAttributes(blk.typeflag, blk.mode),
+            ownerId: blk.uid,
+            groupId: blk.gid,
             size: blk.size,
             mtime: SysTime(unixTimeToStdTime(blk.mtime)),
             type: toEntryType(blk.typeflag),
@@ -561,15 +603,7 @@ struct TarInfo
             info.name = blk.prefix ~ "/" ~ blk.name;
         }
 
-        version (Posix)
-        {
-            // tar mode contains stat.st_mode & 07777.
-            // we have to add the missing flags corresponding to file type
-            // (and by no way tar mode is meaningful on Windows)
-            const filetype = posixModeFileType(blk.typeflag);
-            info.mode |= filetype;
-        }
-        else version (Windows)
+        version (Windows)
         {
             info.name = info.name.replace('\\', '/');
             info.linkname = info.linkname.replace('\\', '/');
@@ -756,6 +790,7 @@ struct TarBox(I)
         // common fields
         TarInfo info = {
             name: entry.path,
+            attributes: entry.attributes,
             size: entry.size,
             mtime: entry.timeLastModified,
             type: entry.type,
@@ -771,25 +806,24 @@ struct TarBox(I)
 
             char[512] buf;
 
-            info.mode = entry.attributes & octal!7777;
-            info.uid = entry.ownerId;
-            info.gid = entry.groupId;
+            info.ownerId = entry.ownerId;
+            info.groupId = entry.groupId;
 
-            if (info.uid != 0)
+            if (info.ownerId != 0)
             {
                 passwd pwdbuf;
                 passwd* pwd;
-                if (getpwuid_r(info.uid, &pwdbuf, buf.ptr, buf.length, &pwd) == 0)
+                if (getpwuid_r(info.ownerId, &pwdbuf, buf.ptr, buf.length, &pwd) == 0)
                 {
                     const len = min(strlen(pwd.pw_name), unameLen);
                     info.uname = pwd.pw_name[0 .. len].idup;
                 }
             }
-            if (info.gid != 0)
+            if (info.groupId != 0)
             {
                 group grpbuf;
                 group* grp;
-                if (getgrgid_r(info.gid, &grpbuf, buf.ptr, buf.length, &grp) == 0)
+                if (getgrgid_r(info.groupId, &grpbuf, buf.ptr, buf.length, &grp) == 0)
                 {
                     const len = min(strlen(grp.gr_name), unameLen);
                     info.gname = grp.gr_name[0 .. len].idup;
@@ -798,8 +832,6 @@ struct TarBox(I)
         }
         else version (Windows)
         {
-            // default to mode 644 which is the most common on UNIX
-            info.mode = "0000644";
             // TODO: https://docs.microsoft.com/fr-fr/windows/win32/secauthz/finding-the-owner-of-a-file-object-in-c--
         }
 
@@ -1046,19 +1078,19 @@ private class TarUnboxEntry : UnboxEntry
 
     @property uint attributes()
     {
-        return _info.mode;
+        return _info.attributes;
     }
 
     version (Posix)
     {
         @property int ownerId()
         {
-            return _info.uid;
+            return _info.ownerId;
         }
 
         @property int groupId()
         {
-            return _info.gid;
+            return _info.groupId;
         }
     }
 
