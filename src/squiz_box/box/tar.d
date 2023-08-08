@@ -635,8 +635,6 @@ string[2] splitLongName(string name)
 @("tar.splitPrefixName")
 unittest
 {
-    import unit_threaded.assertions;
-
     enum shortPath = "some/short/path";
     enum veryLongPath = "some/very/long/long/long/long/long/long/long/long/long/long/long"
         ~ "/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long/long"
@@ -654,9 +652,9 @@ unittest
     static assert(longPath.length > 100);
     static assert(longPath.length < 155);
 
-    splitLongName(shortPath).should == [null, shortPath];
-    splitLongName(veryLongPath).should == [null, veryLongPath];
-    splitLongName(longPath).should == [longPrefix, longName];
+    assert(splitLongName(shortPath) == [null, shortPath]);
+    assert(splitLongName(veryLongPath) == [null, veryLongPath]);
+    assert(splitLongName(longPath) == [longPrefix, longName]);
 }
 
 struct TarBox(I)

@@ -2,8 +2,6 @@ module test.tar;
 
 import squiz_box;
 
-import unit_threaded.assertions;
-
 import std.algorithm;
 import std.array;
 import std.conv;
@@ -12,13 +10,14 @@ import std.stdio;
 import std.string;
 import std.typecons;
 
-@("tar read/write gnulong #17")
+@("read/write gnulong #17")
 unittest
 {
     const content = cast(ByteChunk)("the content of the file".representation);
     const filename = "long-path".repeat(55).join("/") ~ "/file.txt";
     const linkname = "long-path".repeat(55).join("/") ~ "/link.txt";
 
+    // dfmt off
     const entries = only(
             infoEntry(BoxEntryInfo(
                 path: filename,
@@ -37,20 +36,21 @@ unittest
         .unboxTar()
         .map!(e => tuple(e.path, e.type, e.linkname, e.size, cast(ByteChunk)e.readContent()))
         .array;
+    // dfmt on
 
-    entries.length.should == 2;
-    entries[0].should == tuple(
+    assert(entries.length == 2);
+    assert(entries[0] == tuple(
         filename,
         EntryType.regular,
-        cast(string)null,
+        cast(string) null,
         content.length,
         content,
-    );
-    entries[1].should == tuple(
+    ));
+    assert(entries[1] == tuple(
         linkname,
         EntryType.symlink,
         filename,
         ulong(0),
-        cast(ByteChunk)null,
-    );
+        cast(ByteChunk) null,
+    ));
 }

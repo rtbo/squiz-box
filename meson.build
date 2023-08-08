@@ -65,11 +65,6 @@ squiz_dep = declare_dependency(
 )
 
 if get_option('enable_test')
-    ut_assertions_dep = dependency('unit-threaded:assertions',
-        method: 'dub',
-        version: '2.0.3',
-    )
-
     squiz_test_src = squiz_src + files([
         'test/archive.d',
         'test/compress.d',
@@ -94,7 +89,7 @@ if get_option('enable_test')
         d_unittest: true,
         install: false,
         include_directories: squiz_inc,
-        dependencies: squiz_deps + [ut_assertions_dep],
+        dependencies: squiz_deps,
         d_module_versions: squiz_ver,
     )
 
