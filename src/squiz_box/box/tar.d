@@ -411,13 +411,13 @@ size_t encodeLongGnu(ref ubyte[] buffer, size_t offset, string name, Typeflag ty
     BlockInfo gnu = {
         name: "././@LongLink",
         size: name.length,
-        typeflag: Typeflag.gnuLongname,
+        typeflag: typeflag,
         magic: gnuMagic,
     };
     gnu.encode(buffer[offset .. $]);
 
-    buffer[blockLen .. blockLen + name.length] = name.representation;
-    buffer[blockLen + name.length .. blockLen + l512] = 0;
+    buffer[offset + blockLen .. offset + blockLen + name.length] = name.representation;
+    buffer[offset + blockLen + name.length .. offset + blockLen + l512] = 0;
 
     return blockLen + l512;
 }
