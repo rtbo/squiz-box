@@ -571,3 +571,127 @@ class FileBoxEntry : BoxEntry
         return inputRangeObject(ByChunkImpl(File(filePath, "rb"), chunkSize));
     }
 }
+
+struct BoxEntryInfo
+{
+    /// The archive mode this entry is for.
+    /// The path of the entry within the archive.
+    /// Should always be a relative path, and never go backward (..)
+    /// The directory separations are always '/' (forward slash) even on Windows
+    string path;
+
+    /// The type of entry (directory, file, symlink)
+    EntryType type;
+
+    /// If symlink, this is the path pointed to by the link (relative to the symlink).
+    /// Should be null for directories and regular file.
+    string linkname;
+
+    /// The size of the entry in bytes (should be zero for directories and symlink)
+    /// This is the size of uncompressed data.
+    ulong size;
+
+    /// The timeLastModified of the entry
+    SysTime timeLastModified;
+
+    /// The file attributes (as returned std.file.getLinkAttributes)
+    uint attributes;
+
+    version (Posix)
+    {
+        /// The owner id of the entry
+        int ownerId;
+        /// The group id of the entry
+        int groupId;
+    }
+}
+
+class InfoBoxEntry : BoxEntry
+{
+    BoxEntryInfo info;
+    ByteRange data;
+
+    this(BoxEntryInfo info, ByteRange data)
+    in (data is null || data.empty || info.type == EntryType.regular, "data can only be supplied for regular files")
+    {
+        this.info = info;
+        this.data = data;
+    }
+
+    override @property EntryMode mode()
+    {
+        return EntryMode.creation;
+    }
+
+    override @property string path()
+    {
+        return info.path;
+    }
+
+    override @property EntryType type()
+    {
+        return info.type;
+    }
+
+    override @property string linkname()
+    {
+        return info.linkname;
+    }
+
+    override @property ulong size()
+    {
+        return info.size;
+    }
+
+    override @property SysTime timeLastModified()
+    {
+        return info.timeLastModified;
+    }
+
+    override @property uint attributes()
+    {
+        return info.attributes;
+    }
+
+    version (Posix)
+    {
+        override @property int ownerId()
+        {
+            return info.ownerId;
+        }
+
+        override @property int groupId()
+        {
+            return info.groupId;
+        }
+    }
+
+    /// Return the data passed in the ctor.
+    /// chunkSize has no effect here
+    ByteRange byChunk(size_t chunkSize = 0)
+    {
+        if (data)
+            return data;
+        return inputRangeObject(emptyByteRange);
+    }
+}
+
+/// Create a BoxEntry from the provided info.
+/// This allows to create archives out of generated data, without any backing file on disk.
+InfoBoxEntry infoEntry(I)(BoxEntryInfo info, I data)
+if (isByteRange!I)
+in (info.type == EntryType.regular || data.empty, "symlinks and directories can't have data")
+{
+    import std.datetime : Clock;
+
+    if (info.timeLastModified == SysTime.init)
+        info.timeLastModified = Clock.currTime;
+
+    return new InfoBoxEntry(info, inputRangeObject(data));
+}
+
+/// ditto
+InfoBoxEntry infoEntry(BoxEntryInfo info)
+{
+    return infoEntry(info, inputRangeObject(emptyByteRange));
+}
