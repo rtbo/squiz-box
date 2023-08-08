@@ -40,6 +40,105 @@ struct Block
     //dfmt on
 }
 
+@("read/write name 100 chars")
+unittest
+{
+    const content = cast(ByteChunk)("the content of the file".representation);
+    const filename = "long-path".repeat(9).join("/") ~ "/123456.txt";
+
+    assert(filename.length == nameLen);
+
+    // dfmt off
+    const tarData = only(
+            infoEntry(BoxEntryInfo(
+                path: filename,
+                type: EntryType.regular,
+                size: content.length,
+                attributes: octal!"100644",
+            ),
+            only(content))
+        )
+        .boxTar()
+        .join();
+    // dfmt on
+
+    //  0   file block
+    //  1   file data
+    //  2   footer (x2)
+    assert(tarData.length == 4 * blockLen);
+
+    const(Block)* blk = cast(const(Block)*)&tarData[0];
+    assert(blk.typeflag == '0');
+    assert(blk.magic == posixMagic);
+    assert(blk.name == filename);
+    assert(blk.prefix[0] == '\0');
+    assert(tarData[1 * blockLen .. $].startsWith(content));
+
+    assert(tarData[2 * blockLen .. $].all!"a == 0");
+
+    const entries = only(tarData)
+        .unboxTar()
+        .map!(e => tuple(e.path, e.type, e.size, cast(ByteChunk) e.readContent()))
+        .array;
+
+    assert(entries.length == 1);
+    assert(entries[0] == tuple(
+        filename,
+        EntryType.regular,
+        content.length,
+        content,
+    ));
+}
+
+@("read/write split prefix")
+unittest
+{
+    const content = cast(ByteChunk)("the content of the file".representation);
+    const filename = "long-path".repeat(11).join("/") ~ "/file.txt";
+
+    assert(filename.length > nameLen && filename.length < nameLen + prefixLen);
+
+    // dfmt off
+    const tarData = only(
+            infoEntry(BoxEntryInfo(
+                path: filename,
+                type: EntryType.regular,
+                size: content.length,
+                attributes: octal!"100644",
+            ),
+            only(content))
+        )
+        .boxTar()
+        .join();
+    // dfmt on
+
+    //  0   file block
+    //  1   file data
+    //  2   footer (x2)
+    assert(tarData.length == 4 * blockLen);
+
+    const(Block)* blk = cast(const(Block)*)&tarData[0];
+    assert(blk.typeflag == '0');
+    assert(blk.magic == posixMagic);
+    assert(blk.prefix[0 .. 9] == "long-path");
+    assert(tarData[1 * blockLen .. $].startsWith(content));
+
+    assert(tarData[2 * blockLen .. $].all!"a == 0");
+
+    const entries = only(tarData)
+        .unboxTar()
+        .map!(e => tuple(e.path, e.type, e.size, cast(ByteChunk) e.readContent()))
+        .array;
+
+    assert(entries.length == 1);
+    assert(entries[0] == tuple(
+        filename,
+        EntryType.regular,
+        content.length,
+        content,
+    ));
+}
+
 @("read/write gnulong #17")
 unittest
 {
@@ -126,54 +225,5 @@ unittest
         filename,
         ulong(0),
         cast(ByteChunk) null,
-    ));
-}
-
-@("read/write split prefix")
-unittest
-{
-    const content = cast(ByteChunk)("the content of the file".representation);
-    const filename = "long-path".repeat(11).join("/") ~ "/file.txt";
-
-    assert(filename.length > nameLen && filename.length < nameLen + prefixLen);
-
-    // dfmt off
-    const tarData = only(
-            infoEntry(BoxEntryInfo(
-                path: filename,
-                type: EntryType.regular,
-                size: content.length,
-                attributes: octal!"100644",
-            ),
-            only(content))
-        )
-        .boxTar()
-        .join();
-    // dfmt on
-
-    //  0   file block
-    //  1   file data
-    //  2   footer (x2)
-    assert(tarData.length == 4 * blockLen);
-
-    const(Block)* blk = cast(const(Block)*)&tarData[0];
-    assert(blk.typeflag == '0');
-    assert(blk.magic == posixMagic);
-    assert(tarData[1 * blockLen .. $].startsWith(content));
-
-    assert(tarData[2 * blockLen .. $].all!"a == 0");
-
-    const entries = only(tarData)
-        .unboxTar()
-        .map!(e => tuple(e.path, e.type, e.linkname, e.size, cast(ByteChunk) e.readContent()))
-        .array;
-
-    assert(entries.length == 1);
-    assert(entries[0] == tuple(
-        filename,
-        EntryType.regular,
-        cast(string) null,
-        content.length,
-        content,
     ));
 }
