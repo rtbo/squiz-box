@@ -69,10 +69,23 @@ if get_option('enable_test')
         'test/archive.d',
         'test/compress.d',
         'test/main.d',
+        'test/tar.d',
         'test/util.d',
     ])
 
-    squiz_test_exe = executable('squiz-test', squiz_test_src,
+    stupid_gen_exe = executable('stupid_gen', 'tools/stupid_gen.d',
+        d_import_dirs: include_directories('tools'),
+    )
+    squiz_stupid = custom_target('dop_stupid',
+       capture: true,
+        output: 'stupid.d',
+        input: squiz_test_src,
+        command: [
+            stupid_gen_exe, '@INPUT@',
+        ],
+    )
+
+    squiz_test_exe = executable('squiz-test', squiz_stupid, squiz_test_src,
         d_unittest: true,
         install: false,
         include_directories: squiz_inc,
@@ -80,5 +93,7 @@ if get_option('enable_test')
         d_module_versions: squiz_ver,
     )
 
-    test('unit tests', squiz_test_exe)
+    test('unit tests', squiz_test_exe,
+        timeout: 120,
+    )
 endif

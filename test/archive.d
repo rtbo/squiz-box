@@ -3,9 +3,10 @@ module test.archive;
 import test.util;
 import squiz_box;
 
-import std.typecons;
 import std.digest;
 import std.digest.sha;
+import std.stdio;
+import std.typecons;
 
 string[] filesForArchive()
 {
@@ -24,6 +25,12 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
     import std.regex : matchFirst;
     import std.string : splitLines;
 
+    if (!findProgram("tar"))
+    {
+        stderr.writeln("tar not found: skipping assertions");
+        return;
+    }
+
     if (testModes)
     {
         const line1 = `^-rw-r--r-- .+ 7 .+ file1.txt$`;
@@ -32,8 +39,20 @@ void testTarArchiveContent(string archivePath, Flag!"testModes" testModes, Flag!
             `^-rw-rw-rw- .+ 26 .+ folder.+chmod 666.txt$`
             : `^-rw-r--r-- .+ 26 .+ folder.+chmod 666.txt$`;
 
-        auto res = execute(["tar", "-tvf", archivePath]);
+        auto res = execute(["tar", "-tvf", archivePath], ["MM_CHARSET":"UTF-8"]);
         assert(res.status == 0);
+
+        version (Windows)
+        {
+            import std.encoding : transcode;
+
+            // some tar versions of windows use Latin1 encoding
+            dchar[] buf;
+            foreach (char c; res.output)
+                buf ~= cast(dchar)c;
+            transcode(buf, res.output);
+        }
+
         const lines = res.output.splitLines();
         assert(lines.length == 3);
         assert(matchFirst(lines[0], line1));
@@ -70,6 +89,12 @@ void testZipArchiveContent(string archivePath)
     import std.regex : matchFirst;
     import std.string : splitLines;
 
+    if (!findProgram("unzip"))
+    {
+        stderr.writeln("unzip not found: skipping assertions");
+        return;
+    }
+
     const line1 = `^\s*7\s.+file1.txt$`;
     const line2 = `^\s*3521\s.+file 2.txt$`;
     const line3 = `^\s*26\s.+folder/chmod 666.txt$`;
@@ -82,25 +107,19 @@ void testZipArchiveContent(string archivePath)
     assert(matchFirst(lines[4], line2));
     assert(matchFirst(lines[5], line3));
 
-    const archiveShell = escapeShellFileName(archivePath);
-
     auto sha1sumFile(string filename)
     {
-        const fileShell = escapeShellFileName(filename);
-        return executeShell("unzip -p " ~ archiveShell ~ " " ~ fileShell ~ " | sha1sum");
+        return sha1sumProcessStdout(["unzip", "-p", archivePath, filename]);
     }
 
-    res = sha1sumFile("file1.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("38505a984f71c07843a5f3e394ada2bf4c7b6abc"));
+    auto sha1 = sha1sumFile("file1.txt");
+    assert(sha1 == "38505A984F71C07843A5F3E394ADA2BF4C7B6ABC");
 
-    res = sha1sumFile("file 2.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("01fa4c5c29a58449eef1665658c48c0d7829c45f"));
+    sha1 = sha1sumFile("file 2.txt");
+    assert(sha1 == "01FA4C5C29A58449EEF1665658C48C0D7829C45F");
 
-    res = sha1sumFile("folder/chmod 666.txt");
-    assert(res.status == 0);
-    assert(res.output.canFind("3e31b8e6b2bbba1edfcfdca886e246c9e120bbe3"));
+    sha1 = sha1sumFile("folder/chmod 666.txt");
+    assert(sha1 == "3E31B8E6B2BBBA1EDFCFDCA886E246C9E120BBE3");
 }
 
 void testExtractedFiles(DM)(auto ref DM dm, Flag!"mode666" mode666)
@@ -175,8 +194,9 @@ unittest
     }
     else
     {
-        const attr644 = 0;
-        const attr666 = 0;
+        import core.sys.windows.winnt : FILE_ATTRIBUTE_NORMAL;
+        const attr644 = FILE_ATTRIBUTE_NORMAL;
+        const attr666 = FILE_ATTRIBUTE_NORMAL;
     }
 
     const expectedEntries = [
@@ -412,32 +432,31 @@ version (HaveSquizLzma)
 unittest
 {
     import std.algorithm;
+    import std.net.curl : byChunk, CurlException;
     import std.file;
-    import std.net.curl;
     import std.path;
-    import std.range;
     import std.stdio;
 
     const url = "https://github.com/rtbo/squiz-box/archive/refs/tags/v0.2.1.zip";
-
-    auto file = buildPath(tempDir(), "squiz-box-0.2.1.zip");
     auto dir = buildPath(tempDir(), "squiz-box-0.2.1");
 
-    download(url, file);
     mkdirRecurse(dir);
-
-    version (Posix)
+    scope (exit)
     {
-        scope (exit)
-            remove(file);
-        scope (exit)
-            rmdirRecurse(dir);
+        rmdirRecurse(dir);
     }
 
-    unboxZip(File(file, "rb"), Yes.removePrefix)
-        .each!(e => e.extractTo(dir));
+    try
+    {
+        byChunk(url)
+            .unboxZip(Yes.removePrefix)
+            .each!(e => e.extractTo(dir));
 
-    assert(isFile(buildPath(dir, "meson.build")));
+        assert(isFile(buildPath(dir, "meson.build")));
+        assert(isFile(buildPath(dir, "test", "archive.d")));
+    }
+    catch (CurlException)
+    {}
 }
 
 @("Extract 7z")

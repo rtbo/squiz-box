@@ -63,7 +63,7 @@ interface Cursor
     /// Read T.sizeof data and returns it as a T.
     /// Similar to getValue!T but the value is passed as pointer to be filled in.
     /// Prefer this form for greater values (e.g. dozens of bytes)
-    void readValue(T)(T* val) if (!isDynamicArray!T)
+    void readValue(T)(scope T* val) if (!isDynamicArray!T)
     {
         import std.exception : enforce;
 
@@ -75,7 +75,7 @@ interface Cursor
 
     T[] read(T)(T[] buffer)
     {
-        auto ptr = cast(ubyte)&buffer[0];
+        auto ptr = cast(ubyte*)&buffer[0];
         auto arr = ptr[0 .. buffer.length * T.sizeof];
         auto res = read(arr);
         enforce(res.length % T.sizeof == 0, "Could not read aligned bytes for " ~ T.stringof);

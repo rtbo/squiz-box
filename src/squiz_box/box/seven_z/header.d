@@ -193,7 +193,7 @@ struct Header
         auto unpacked = cursorByteRange(mainCursor, packSize)
             .squizMaxOut(algo, unpackSize)
             .join();
-        assert(unpacked.length = unpackSize);
+        assert(unpacked.length == unpackSize);
 
         static if (false)
         {
