@@ -21,7 +21,8 @@ struct ZipAlgo
         return ZipBox!I(entries, chunkSize);
     }
 
-    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+    auto unbox(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+            if (isByteRange!I)
     {
         auto stream = new ByteRangeCursor!I(input);
         return ZipUnbox!Cursor(stream, removePrefix);
@@ -36,7 +37,8 @@ auto boxZip(I)(I entries, size_t chunkSize = defaultChunkSize)
     return ZipBox!I(entries, chunkSize);
 }
 
-auto unboxZip(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix) if (isByteRange!I)
+auto unboxZip(I)(I input, Flag!"removePrefix" removePrefix = No.removePrefix)
+        if (isByteRange!I)
 {
     auto stream = new ByteRangeCursor!I(input);
     return ZipUnbox!Cursor(stream, removePrefix);
@@ -121,7 +123,8 @@ private struct ZipBox(I)
             // more header allocation will be needed if Zip64 extra field is needed.
 
             version (Posix)
-                size_t extraFieldLength = UnixExtraField.computeTotalLength(entry.linkname);
+                size_t extraFieldLength =
+                    UnixExtraField.computeTotalLength(entry.linkname) + SquizBoxExtraField.sizeof;
             else
                 size_t extraFieldLength;
 
@@ -129,9 +132,7 @@ private struct ZipBox(I)
 
             maxHeaderSize = max(
                 maxHeaderSize,
-                LocalFileHeader.computeTotalLength(path, null) +
-                    extraFieldLength +
-                    SquizBoxExtraField.sizeof
+                LocalFileHeader.computeTotalLength(path, null) + extraFieldLength
             );
             centralDirectorySize += CentralFileHeader.computeTotalLength(path, null, null) + extraFieldLength;
         }
@@ -169,13 +170,13 @@ private struct ZipBox(I)
         version (Posix)
         {
             efInfo.addUnix(entry.linkname, entry.timeLastModified, entry.ownerId, entry.groupId);
+            efInfo.addSquizBox(entry.attributes);
         }
-        efInfo.addSquizBox(entry.attributes);
 
         const localExtraFieldData = efInfo.toZipData();
         const localHeaderLength = LocalFileHeader.computeTotalLength(path, localExtraFieldData);
 
-        const centralExtraFieldData = localExtraFieldData[0 .. $ - SquizBoxExtraField.sizeof];
+        const centralExtraFieldData = localExtraFieldData;
         const centralHeaderLength = CentralFileHeader.computeTotalLength(path, centralExtraFieldData, null);
 
         if (localHeaderBuffer.length < localHeaderLength)
@@ -654,11 +655,6 @@ private struct ZipUnbox(C) if (is(C : Cursor))
             info.compressedSize = header.compressedSize.val;
         }
 
-        if (efInfo.has(KnownExtraField.squizBox))
-        {
-            info.attributes = efInfo.attributes;
-        }
-
         info.type = info.compressedSize == 0 ? EntryType.directory : EntryType.regular;
 
         version (Posix)
@@ -676,12 +672,17 @@ private struct ZipUnbox(C) if (is(C : Cursor))
             {
                 info.timeLastModified = DosFileTimeToSysTime(header.lastModDosTime.val);
             }
+
+            if (efInfo.has(KnownExtraField.squizBox))
+                info.attributes = efInfo.attributes;
+            else
+                info.attributes = defaultAttributes(info.type);
         }
         else
         {
             info.timeLastModified = DosFileTimeToSysTime(header.lastModDosTime.val);
+            info.attributes = defaultAttributes(info.type);
         }
-
     }
 
     private void readEntry()
@@ -727,11 +728,6 @@ private struct ZipUnbox(C) if (is(C : Cursor))
                 CentralFileHeader.sizeof +
                 path.length +
                 extraFieldData.length;
-            if (efInfo.has(KnownExtraField.squizBox))
-            {
-                // central directory do not have squiz box extra field
-                info.entrySize -= SquizBoxExtraField.sizeof;
-            }
         }
 
         nextHeader = input.pos + info.compressedSize;
@@ -743,12 +739,13 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         {
             import std.algorithm : min;
 
-            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(info.path));
+            const pref = enforce(entryPrefix(info.path, info.type), format!`"%s": no prefix to be removed`(
+                    info.path));
 
             if (!prefix)
                 prefix = pref;
 
-            enforce (prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, prefix));
+            enforce(prefix == pref, format!`"%s": path prefix mismatch with "%s"`(info.path, prefix));
 
             const len = min(info.path.length, prefix.length);
             info.path = info.path[len .. $];
@@ -759,6 +756,39 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         }
 
         currentEntry = new ZipUnboxEntry!C(input, info);
+    }
+}
+
+uint defaultAttributes(EntryType type)
+{
+    version (Posix)
+    {
+        import std.conv : octal;
+
+        final switch (type)
+        {
+        case EntryType.regular:
+            return octal!"100644";
+        case EntryType.symlink:
+            return octal!"120644";
+        case EntryType.directory:
+            return octal!"040644";
+        }
+    }
+    else
+    {
+        import core.sys.windows.winnt : FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_DIRECTORY;
+
+        final switch (type)
+        {
+        case EntryType.regular:
+            return FILE_ATTRIBUTE_NORMAL;
+        case EntryType.symlink:
+            // TODO: symlinks on Windows
+            return FILE_ATTRIBUTE_NORMAL;
+        case EntryType.directory:
+            return FILE_ATTRIBUTE_DIRECTORY;
+        }
     }
 }
 
@@ -799,17 +829,17 @@ private struct ExtraFieldInfo
     ulong compressedSize;
     ulong localHeaderPos;
 
-    // unix
     version (Posix)
     {
+        // unix
         string linkname;
         SysTime timeLastModified;
         int ownerId;
         int groupId;
-    }
 
-    // squizBox
-    uint attributes;
+        // squizBox
+        uint attributes;
+    }
 
     bool has(KnownExtraField f) const
     {
@@ -834,12 +864,12 @@ private struct ExtraFieldInfo
             this.ownerId = ownerId;
             this.groupId = groupId;
         }
-    }
 
-    void addSquizBox(uint attributes)
-    {
-        fields |= KnownExtraField.squizBox;
-        this.attributes = attributes;
+        void addSquizBox(uint attributes)
+        {
+            fields |= KnownExtraField.squizBox;
+            this.attributes = attributes;
+        }
     }
 
     size_t computeLength()
@@ -852,9 +882,9 @@ private struct ExtraFieldInfo
         {
             if (has(KnownExtraField.unix))
                 sz += UnixExtraField.computeTotalLength(linkname);
+            if (has(KnownExtraField.squizBox))
+                sz += SquizBoxExtraField.sizeof;
         }
-        if (has(KnownExtraField.squizBox))
-            sz += SquizBoxExtraField.sizeof;
 
         return sz;
     }
@@ -881,11 +911,6 @@ private struct ExtraFieldInfo
                 info.compressedSize = ef.compressedSize.val;
                 info.localHeaderPos = ef.localHeaderPos.val;
                 break;
-            case SquizBoxExtraField.expectedId:
-                info.fields |= KnownExtraField.squizBox;
-                auto ef = cast(SquizBoxExtraField*) data.ptr;
-                info.attributes = ef.attributes.val;
-                break;
                 // dfmt off
             version (Posix)
             {
@@ -900,6 +925,11 @@ private struct ExtraFieldInfo
                         info.linkname = cast(string)
                             data[UnixExtraField.sizeof .. efLen].idup;
                     }
+                    break;
+                case SquizBoxExtraField.expectedId:
+                    info.fields |= KnownExtraField.squizBox;
+                    auto ef = cast(SquizBoxExtraField*) data.ptr;
+                    info.attributes = ef.mode.val;
                     break;
             }
             // dfmt on
@@ -951,14 +981,15 @@ private struct ExtraFieldInfo
                     pos += linkname.length;
                 }
             }
-        }
-        if (has(KnownExtraField.squizBox))
-        {
-            auto f = cast(SquizBoxExtraField*)&data[pos];
-            f.id = SquizBoxExtraField.expectedId;
-            f.size = SquizBoxExtraField.sizeof - 4;
-            f.attributes = attributes;
-            pos += SquizBoxExtraField.sizeof;
+
+            if (has(KnownExtraField.squizBox))
+            {
+                auto f = cast(SquizBoxExtraField*)&data[pos];
+                f.id = SquizBoxExtraField.expectedId;
+                f.size = SquizBoxExtraField.sizeof - 4;
+                f.mode = attributes;
+                pos += SquizBoxExtraField.sizeof;
+            }
         }
 
         assert(pos == sz);
@@ -1521,23 +1552,25 @@ version (Posix)
     }
 
     static assert(UnixExtraField.sizeof == 16);
-}
 
-// Extra field that places the file attributes in the local header
-private struct SquizBoxExtraField
-{
-    enum expectedId = 0x4273; // SB
-
-    LittleEndian!2 id = expectedId;
-    LittleEndian!2 size = 4;
-    LittleEndian!4 attributes;
-
-    void writeTo(ubyte[] buffer)
+    /// Extra field that places the file Unix permission bits in the local header.
+    /// The attribute field contain the Unix permission as returned in the `st_mode`
+    /// of `struct stat`. (e.g. 100644). It is stored in little-endian.
+    private struct SquizBoxExtraField
     {
-        assert(buffer.length == 8);
-        auto ptr = id.data.ptr;
-        buffer[0 .. SquizBoxExtraField.sizeof] = ptr[0 .. SquizBoxExtraField.sizeof];
-    }
-}
+        enum expectedId = 0x4273; // SB
 
-static assert(SquizBoxExtraField.sizeof == 8);
+        LittleEndian!2 id = expectedId;
+        LittleEndian!2 size = 4;
+        LittleEndian!4 mode;
+
+        void writeTo(ubyte[] buffer)
+        {
+            assert(buffer.length == 8);
+            auto ptr = id.data.ptr;
+            buffer[0 .. SquizBoxExtraField.sizeof] = ptr[0 .. SquizBoxExtraField.sizeof];
+        }
+    }
+
+    static assert(SquizBoxExtraField.sizeof == 8);
+}
