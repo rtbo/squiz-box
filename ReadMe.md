@@ -11,6 +11,8 @@ where one is the compressed stream of the other.
 Squiz-Box provides both compile time known structures and dynamic types over all algorithms.
 ## Compression / decompression
 
+Compression / decompression is provided by well-known libraries.
+
 The range based design makes _squizing_ suitable for streaming and for
 transforming data from any kind of source to any kind of destination.
 
@@ -32,13 +34,13 @@ about decompression parameters and integrity checking.
 A raw format refers to data compressed without such header and trailer and can
 be used only in applications or archive that know how to decompress the stream by other means.
 
-| Algorithms | Squiz structs | Available formats |
-|-----|----|----|
-| Deflate | `Deflate` (compression), `Inflate` (decompression) | Zlib, Gzip, Raw |
-| Bzip2   | `CompressBzip2`, `DecompressBzip2` | Bzip2           |
-| LZMA1 (legacy compression) | `CompressLzma`, `DecompressLzma` | Xz, Lzma (legacy format), Raw |
-| LZMA (aka. LZMA2)   | `CompressLzma`, `DecompressLzma` | Xz, Raw |
-| Zstandard | `CompressZstd`, `DecompressZstd` | Zstandard |
+| Algorithms | library | Squiz structs | Available formats |
+|-----|----|----|----|
+| Deflate | `zlib` | `Deflate` (compression), `Inflate` (decompression) | Zlib, Gzip, Raw |
+| Bzip2   | `bzip2` | `CompressBzip2`, `DecompressBzip2` | Bzip2           |
+| LZMA1 (legacy compression) | `xz-utils`| `CompressLzma`, `DecompressLzma` | Xz, Lzma (legacy format), Raw |
+| LZMA (aka. LZMA2) | `xz-utils` | `CompressLzma`, `DecompressLzma` | Xz, Raw |
+| Zstandard | `zstd` | `CompressZstd`, `DecompressZstd` | Zstandard |
 
 In addition, the LZMA1 and LZMA compression also support additional filters
 that transorm the data before the compression stage in order to increase
@@ -53,12 +55,13 @@ the compression ratio:
 ## Archiving
 
 Archiving is similar to the compression/decompression API: algorithms are described by structs
-that share a common interface and that use pass to the `box` and `unbox` function to process D ranges.
+that share a common interface and that you pass to the `box` and `unbox` function to process D ranges.
 
 The `box` function generates a range of byte chunks from a range of entries, and the opposite
 is done by the `unbox` function.
-`box` consumes a range of `BoxEntry`, which is a class that can be derived (only `FileBoxEntry` is provided so far).
-`unbox` returns a range of `UnboxEntry`, which has an `extractTo` method.
+`box` consumes a range of `BoxEntry`, which is a class that can be derived (eg. `FileBoxEntry`, `InfoBoxEntry`).
+`unbox` returns a range of `UnboxEntry`, which has a `byChunk` method to get the data and an `extractTo` helper
+that extracts the data in the filesystem.
 See hereunder for code examples.
 
 The following formats are supported:
@@ -67,8 +70,8 @@ The following formats are supported:
 
 There is also WIP for 7z.
 
-Squiz-Box will not allocate more memory than strictly necessary. A consequence is that the ranges of `UnboxEntry` must be
-processed in the order they are in the archive.
+Squiz-Box will try to process the archive in a single pass whenever possible and will not allocate more memory than necessary.
+A consequence is that the ranges of `UnboxEntry` must be processed in the order they are in the archive.
 If one needs to store the entries in memory, some algorithms take a `File` or `const(ubyte)[]` parameter to describe the whole archive.
 Each `UnboxEntry` will reference the data source and seek as necessary. (e.g. `unboxZip(File)`)
 
@@ -240,12 +243,36 @@ import squiz_box;
 auto algo = CompressZstd.init;
 auto stream = algo.initialize();
 
-// repeat for as many chunks of memory as necessary
-stream.input = dataChunk;
+stream.input = nextDataChunk();
 stream.output = buffer;
-auto streamEnded = algo.process(stream, No.lastChunk);
-// send buffer content out
-// at some point we send the last chunk and receive notification that the stream is done.
+
+// something along this logic
+while(true)
+{
+    const lastChunk = hasDataChunk() ? No.lastChunk : Yes.lastChunk;
+
+    // algo.process will compress data from input to output.
+    // along the way, stream.input and stream.output are reduced.
+    // (e.g. stream.input = stream.input[processed .. $])
+    // Depending on algorithm latency, it is possible to consume several mega-bytes of input
+    // before starting to write any output.
+    const streamEnded = algo.process(stream, lastChunk);
+
+    if (streamEnded || stream.output.empty)
+    {
+        // send the filled buffer out and notify the stream that output space is available
+        // (no need to zero-out the buffer)
+        sendBufferOut(buffer[0 .. $ - stream.output.length]);
+        stream.output = buffer;
+    }
+
+    if (stream.input.empty && hasDataChunk())
+        // initialize or reset new input data
+        stream.input = nextDataChunk();
+
+    if (streamEnded)
+        break;
+}
 
 // we can reset the stream and keep the allocated resources for a new round
 algo.reset(stream);
@@ -275,9 +302,7 @@ ninja && ./squiz-test
 
 To build test on Windows:
 ```dos
-rem Visual Studio prompt is required
-rem A script is provided to help this (needs vswhere)
-win_env_vs.bat
+rem Visual Studio prompt is required (e.g. Windows Terminal)
 meson builddir
 cd builddir
 ninja && squiz-test.exe
