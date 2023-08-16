@@ -25,6 +25,8 @@ struct TarAlgo
         auto dataInput = new ByteRangeCursor!I(input);
         return TarUnbox(dataInput, removePrefix);
     }
+
+    enum mimetype = "application/x-tar";
 }
 
 static assert(isBoxAlgo!TarAlgo);
@@ -46,6 +48,8 @@ struct TarGzAlgo
         auto dataInput = new ByteRangeCursor!II(ii);
         return TarUnbox(dataInput, removePrefix);
     }
+
+    enum mimetype = "application/x-gtar";
 }
 
 static assert(isBoxAlgo!TarGzAlgo);
@@ -69,6 +73,8 @@ version (HaveSquizBzip2)
             auto dataInput = new ByteRangeCursor!II(ii);
             return TarUnbox(dataInput, removePrefix);
         }
+
+        enum mimetype = "application/x-gtar";
     }
 
     static assert(isBoxAlgo!TarBzip2Algo);
@@ -93,6 +99,8 @@ version (HaveSquizLzma)
             auto dataInput = new ByteRangeCursor!II(ii);
             return TarUnbox(dataInput, removePrefix);
         }
+
+        enum mimetype = "application/x-gtar";
     }
 
     static assert(isBoxAlgo!TarXzAlgo);

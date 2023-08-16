@@ -27,6 +27,8 @@ struct ZipAlgo
         auto stream = new ByteRangeCursor!I(input);
         return ZipUnbox!Cursor(stream, removePrefix);
     }
+
+    enum mimetype = "application/zip";
 }
 
 static assert(isBoxAlgo!ZipAlgo);

@@ -46,6 +46,7 @@ template isBoxAlgo(A)
                 BoxEntry[] boxEntries;
                 const(ubyte)[] bytes = algo.box(boxEntries).join();
                 UnboxEntry[] unboxEntries = algo.unbox(only(bytes), No.removePrefix).array;
+                string mt = algo.mimetype;
             }));
 }
 
@@ -71,6 +72,9 @@ interface BoxAlgo
     {
         return unbox(inputRangeObject(bytes), removePrefix);
     }
+
+    /// The mimetype of the compressed archive
+    @property string mimetype() const;
 }
 
 static assert(isBoxAlgo!BoxAlgo);
@@ -93,6 +97,11 @@ private class CBoxAlgo(A) : BoxAlgo if (isBoxAlgo!A)
     UnboxEntryRange unbox(ByteRange bytes, Flag!"removePrefix" removePrefix)
     {
         return inputRangeObject(algo.unbox(bytes, removePrefix));
+    }
+
+    @property string mimetype() const
+    {
+        return algo.mimetype;
     }
 }
 
