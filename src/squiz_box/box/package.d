@@ -374,7 +374,8 @@ interface UnboxEntry : ArchiveEntry
         import std.stdio : File;
         import std.string : startsWith;
 
-        assert(exists(baseDirectory) && isDir(baseDirectory));
+        assert(exists(baseDirectory) && isDir(baseDirectory),
+            "extracting to " ~ baseDirectory ~ ": must be a directory");
 
         enforce(
             !this.isBomb,
@@ -697,8 +698,7 @@ class InfoBoxEntry : BoxEntry
 
 /// Create a BoxEntry from the provided info.
 /// This allows to create archives out of generated data, without any backing file on disk.
-InfoBoxEntry infoEntry(I)(BoxEntryInfo info, I data)
-if (isByteRange!I)
+InfoBoxEntry infoEntry(I)(BoxEntryInfo info, I data) if (isByteRange!I)
 in (info.type == EntryType.regular || data.empty, "symlinks and directories can't have data")
 {
     import std.datetime : Clock;
