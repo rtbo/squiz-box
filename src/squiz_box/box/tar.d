@@ -25,6 +25,8 @@ struct TarAlgo
         auto dataInput = new ByteRangeCursor!I(input);
         return TarUnbox(dataInput, removePrefix);
     }
+
+    enum mimetype = "application/x-tar";
 }
 
 static assert(isBoxAlgo!TarAlgo);
@@ -46,6 +48,8 @@ struct TarGzAlgo
         auto dataInput = new ByteRangeCursor!II(ii);
         return TarUnbox(dataInput, removePrefix);
     }
+
+    enum mimetype = "application/x-gtar";
 }
 
 static assert(isBoxAlgo!TarGzAlgo);
@@ -69,6 +73,8 @@ version (HaveSquizBzip2)
             auto dataInput = new ByteRangeCursor!II(ii);
             return TarUnbox(dataInput, removePrefix);
         }
+
+        enum mimetype = "application/x-gtar";
     }
 
     static assert(isBoxAlgo!TarBzip2Algo);
@@ -93,6 +99,8 @@ version (HaveSquizLzma)
             auto dataInput = new ByteRangeCursor!II(ii);
             return TarUnbox(dataInput, removePrefix);
         }
+
+        enum mimetype = "application/x-gtar";
     }
 
     static assert(isBoxAlgo!TarXzAlgo);
@@ -183,8 +191,8 @@ enum Typeflag : ubyte
     directory = '5',
     fifo = '6',
     contiguousFile = '7',
-    posixExtended = 'g',
-    extended = 'x',
+    extendedGlobal = 'g',
+    extendedFile = 'x',
     gnuLongname = 'L',
     gnuLonglink = 'K',
 }
@@ -564,9 +572,10 @@ struct TarInfo
         case Typeflag.directory:
         case Typeflag.fifo:
         case Typeflag.contiguousFile:
-        case Typeflag.posixExtended:
-        case Typeflag.extended:
             return decodeHeader(blk);
+        case Typeflag.extendedGlobal:
+        case Typeflag.extendedFile:
+            return skipExtendedDecodeHeader(cursor, blk);
         case Typeflag.gnuLongname:
         case Typeflag.gnuLonglink:
             return decodeGnuLongHeader(cursor, blk);
@@ -610,6 +619,14 @@ struct TarInfo
         }
 
         return info;
+    }
+
+    private static TarInfo skipExtendedDecodeHeader(Cursor cursor, scope ref BlockInfo blk)
+    {
+        const sz = next512(blk.size);
+        cursor.ffw(sz);
+
+        return TarInfo.decode(cursor);
     }
 
     private static TarInfo decodeGnuLongHeader(Cursor cursor, scope ref BlockInfo blk)

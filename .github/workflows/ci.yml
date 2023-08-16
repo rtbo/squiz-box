@@ -50,3 +50,11 @@ jobs:
       - name: Test Dub package
         run: dub run --arch=x86_64
         working-directory: .github/dub_test
+
+      - name: Test download_unbox Example
+        run: ./download_unbox.d
+        working-directory: examples
+
+      - name: Test box_upload Example
+        run: ./box_upload.d
+        working-directory: examples

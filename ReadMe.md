@@ -226,6 +226,75 @@ dirEntries(root, SpanMode.breadth, false)
     .writeBinaryFile(filename);
 ```
 
+### Download, list and extract archive
+
+This examples uses [`requests`](https://github.com/ikod/dlang-requests) to download
+an archive from the web, list the archive content and extract it with a single expression.
+(`std.net.curl.byChunk` would also work and woudn't require the const casting)
+
+Thanks to D ranges laziness, the archive is extracted as the data download progresses.
+As such, it is possible to download and extract very large archives with minimal memory footprint
+(and without creating an intermediate file on disk).
+
+```d
+import squiz_box;
+import requests;
+
+const url = "https://github.com/dlang/dmd/archive/master.tar.gz";
+const dest = ".";
+
+// Algorithm matched at runtime with url (using extension)
+auto algo = boxAlgo(url);
+
+size_t downloadSz;
+
+auto rq = Request();
+rq.useStreaming = true;
+rq.get(url).receiveAsRange()
+    .map!(c => cast(const(ubyte)[])c)             // type-casting to const is necessary
+    .tee!(c => downloadSz += c.length)            // trace download size
+    .unbox(algo)
+    .tee!(e => writeln(buildPath(dest, e.path)))  // list archive content
+    .each!(e => e.extractTo(dest));               // extract
+```
+
+### Create archive, list and upload to web
+
+This examples creates an archive and uses [`requests`](https://github.com/ikod/dlang-requests) to upload
+it on the web.
+As in the previous example, the data is uploaded as the archive creation progresses.
+
+```d
+import squiz_box;
+import requests;
+
+const postTo = "https://httpbin.org/post";
+const fmt = ".tar.xz";
+const src = "...";
+const prefix;
+
+size_t uploadSz;
+
+// Algorithm matched at runtime (using extension)
+auto algo = boxAlgo(fmt);
+
+const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
+
+auto archiveChunks = dirEntries(src, SpanMode.breadth, false)
+    .filter!(e => !e.isDir)
+    .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
+    .tee!(e => writeln(e.name))
+    .map!(e => fileEntry(e.name, src, prefix))
+    .box(algo)
+    .tee!(c => uploadSz += c.length);
+
+auto rq = Request();
+auto resp = rq.post(postTo, archiveChunks, algo.mimetype);
+enforce(resp.code < 300, format!"%s responded %s"(postTo, resp.code));
+
+writefln!"POST %s - status %s (posted %s bytes)"(postTo, resp.code, uploadSz);
+```
+
 ### Full control over the streaming process
 
 Sometimes, D ranges are not practical. Think of a receiver thread that

@@ -46,6 +46,7 @@ template isBoxAlgo(A)
                 BoxEntry[] boxEntries;
                 const(ubyte)[] bytes = algo.box(boxEntries).join();
                 UnboxEntry[] unboxEntries = algo.unbox(only(bytes), No.removePrefix).array;
+                string mt = algo.mimetype;
             }));
 }
 
@@ -56,7 +57,7 @@ interface BoxAlgo
     ByteRange box(BoxEntryRange entries, size_t chunkSize = defaultChunkSize);
 
     /// ditto
-    ByteRange box(I)(I entries, size_t chunkSize = defaultChunkSize)
+    final ByteRange box(I)(I entries, size_t chunkSize = defaultChunkSize)
             if (isBoxEntryRange!I && !is(I == BoxEntryRange))
     {
         return box(inputRangeObject(entries), chunkSize);
@@ -66,11 +67,24 @@ interface BoxAlgo
     UnboxEntryRange unbox(ByteRange bytes, Flag!"removePrefix" removePrefix = No.removePrefix);
 
     /// ditto
-    UnboxEntryRange unbox(I)(I bytes, Flag!"removePrefix" removePrefix = No.removePrefix)
-            if (isByteRange!I && !is(I == ByteRange))
+    final UnboxEntryRange unbox(I)(I bytes, Flag!"removePrefix" removePrefix = No.removePrefix)
+            if (isByteRange!I && !is(I : ByteRange))
     {
+        // It is necessary to disambiguate `!is(I : ByteRange) with non-const `ubyte[]` range.
+        // Otherwise we can have infinite recursion and stack overflow at runtime.
+        // The assertion could be in the template constraints, but the static assertion gives
+        // opportunity of a helpful message.
+        // TODO: add an overload accepting a non-const `ubyte[]` range. Can be tested with
+        // requests `ReceiveAsRange`
+        enum message = "Squiz-Box requires range of `const(ubyte)[]` but received `ubyte[]`. "
+            ~ "Consider typecasting your range with `.map!(c => cast(const(ubyte)[])c)`";
+        static assert(!is(ElementType!I == ubyte[]), message);
+
         return unbox(inputRangeObject(bytes), removePrefix);
     }
+
+    /// The mimetype of the compressed archive
+    @property string mimetype() const;
 }
 
 static assert(isBoxAlgo!BoxAlgo);
@@ -93,6 +107,11 @@ private class CBoxAlgo(A) : BoxAlgo if (isBoxAlgo!A)
     UnboxEntryRange unbox(ByteRange bytes, Flag!"removePrefix" removePrefix)
     {
         return inputRangeObject(algo.unbox(bytes, removePrefix));
+    }
+
+    @property string mimetype() const
+    {
+        return algo.mimetype;
     }
 }
 
@@ -355,7 +374,8 @@ interface UnboxEntry : ArchiveEntry
         import std.stdio : File;
         import std.string : startsWith;
 
-        assert(exists(baseDirectory) && isDir(baseDirectory));
+        assert(exists(baseDirectory) && isDir(baseDirectory),
+            "extracting to " ~ baseDirectory ~ ": must be a directory");
 
         enforce(
             !this.isBomb,
@@ -678,8 +698,7 @@ class InfoBoxEntry : BoxEntry
 
 /// Create a BoxEntry from the provided info.
 /// This allows to create archives out of generated data, without any backing file on disk.
-InfoBoxEntry infoEntry(I)(BoxEntryInfo info, I data)
-if (isByteRange!I)
+InfoBoxEntry infoEntry(I)(BoxEntryInfo info, I data) if (isByteRange!I)
 in (info.type == EntryType.regular || data.empty, "symlinks and directories can't have data")
 {
     import std.datetime : Clock;
