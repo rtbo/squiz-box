@@ -179,24 +179,6 @@ readBinaryFile(archive)
     .each!(e => e.extractTo(extractionSite));
 ```
 
-### Compression/Decompression with algorithm known at runtime
-
-```d
-import squiz_box;
-
-// SquizAlgo is a D interface
-// it must be instantiated from a compile-time known algorithm
-SquizAlgo algo = squizAlgo(Deflate.init);
-
-// the rest is the same as previously
-
-const ubyte[] data = myDataToCompress();
-
-only(data)
-  .squiz(algo)
-  .sendOverNetwork();
-```
-
 ### Download, list and extract archive
 
 This examples uses [`requests`](https://github.com/ikod/dlang-requests) to download
