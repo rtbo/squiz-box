@@ -2,6 +2,8 @@
 
 A D library that handles compression / decompression and archiving.
 
+TL;DR: [See examples](#code-examples)
+
 In the Squiz-Box terminology, `squiz` refers to compression/decompression, while `box` refers to
 archiving. Squiz-Box API consists almost exclusively of range algorithms.
 `squiz` related algorithms map a range of bytes (range of byte chunks actually) to another range of bytes
@@ -34,13 +36,13 @@ about decompression parameters and integrity checking.
 A raw format refers to data compressed without such header and trailer and can
 be used only in applications or archive that know how to decompress the stream by other means.
 
-| Algorithms | library | Squiz structs | Available formats |
-|-----|----|----|----|
-| Deflate | `zlib` | `Deflate` (compression), `Inflate` (decompression) | Zlib, Gzip, Raw |
-| Bzip2   | `bzip2` | `CompressBzip2`, `DecompressBzip2` | Bzip2           |
-| LZMA1 (legacy compression) | `xz-utils`| `CompressLzma`, `DecompressLzma` | Xz, Lzma (legacy format), Raw |
-| LZMA (aka. LZMA2) | `xz-utils` | `CompressLzma`, `DecompressLzma` | Xz, Raw |
-| Zstandard | `zstd` | `CompressZstd`, `DecompressZstd` | Zstandard |
+| Algorithms | Library | Squiz structs | Compression helpers | Decompression Helpers | Available formats |
+|-----|----|----|----|----|----|
+| Deflate | `zlib` | `Deflate` (compression), `Inflate` (decompression) | `deflate`, `deflateGz`, `deflateRaw` |  `inflate`, `inflateGz`, `inflateRaw` | Zlib, Gzip, Raw |
+| Bzip2   | `bzip2` | `CompressBzip2`, `DecompressBzip2` | `compressBzip2` | `decompressBzip2` |Bzip2           |
+| LZMA (aka. LZMA2) | `xz-utils` | `CompressLzma`, `DecompressLzma`  | `compressXz`, `compressLzmaRaw` | `decompressXz`, `decompressLzmaRaw`| Xz, Raw |
+| LZMA1 (legacy compression) | `xz-utils`| `CompressLzma`, `DecompressLzma` | | | Xz, Lzma (legacy format), Raw |
+| Zstandard | `zstd` | `CompressZstd`, `DecompressZstd` | `compressZstd` | `decompressZstd` | Zstandard |
 
 In addition, the LZMA1 and LZMA compression also support additional filters
 that transorm the data before the compression stage in order to increase
@@ -64,9 +66,13 @@ is done by the `unbox` function.
 that extracts the data in the filesystem.
 See hereunder for code examples.
 
-The following formats are supported:
-- Tar (including `.tar.gz`, `.tar.bz2`, `.tar.xz`)
-- Zip
+| Archive Format | Struct | Box helper | Unbox helper |
+|--------|--------|--------|-----|
+| `.tar` | `TarAlgo` | `boxTar` | `unboxTar` |
+| `.tar.gz` | `TarGzAlgo` | `boxTarGz` | `unboxTarGz` |
+| `.tar.bz2` | `TarBzip2Algo` | `boxTarBzip2` | `unboxTarBzip2` |
+| `.tar.xz` | `TarXzAlgo` | `boxTarXz` | `unboxTarXz` |
+| `.zip` | `ZipAlgo` | `boxZip` | `unboxZip` |
 
 There is also WIP for 7z.
 
@@ -152,8 +158,7 @@ dirEntries(root, SpanMode.breadth, false)
     .filter!(e => !e.isDir)
     .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
     .map!(e => fileEntry(e.name, root, prefix))
-    .boxTar()
-    .compressXz()
+    .boxTarXz()
     .writeBinaryFile("squiz-box-12.5.tar.xz");
 
 /// boxTarXz() is equivalent to boxTar().compressXz()
@@ -190,40 +195,6 @@ const ubyte[] data = myDataToCompress();
 only(data)
   .squiz(algo)
   .sendOverNetwork();
-```
-
-### Boxing/Unboxing with algorithm known at runtime
-
-```d
-import squiz_box;
-
-import std.algorithm;
-import std.file;
-import std.path;
-
-const filename = "squiz-box-12.5.tar.xz";
-
-/// BoxAlgo is a D interface
-/// It can be instantiated from a filename with archive extension
-/// or directly with the implementing struct (ZipAlgo, TarXzAlgo, ...)
-BoxAlgo algo = boxAlgo(filename);
-
-/// the rest is the same as before
-
-const root = squizBoxDir;
-
-// prefix all files path in the archive
-// don't forget the trailing '/'!
-const prefix = "squiz-box-12.5/";
-
-const exclusion = [".git", ".dub", ".vscode", "libsquiz-box.a", "build"];
-
-dirEntries(root, SpanMode.breadth, false)
-    .filter!(e => !e.isDir)
-    .filter!(e => !exclusion.any!(ex => e.name.canFind(ex)))
-    .map!(e => fileEntry(e.name, root, prefix))
-    .box(algo)
-    .writeBinaryFile(filename);
 ```
 
 ### Download, list and extract archive
