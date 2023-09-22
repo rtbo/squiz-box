@@ -427,6 +427,13 @@ interface WriteCursor
     void put(ubyte val);
 
     void write(scope const(ubyte)[] arr);
+
+    void putValue(T)(T value)
+    {
+        scope ubyte* ptr = cast(ubyte*)(&value);
+        scope ubyte[] arr = ptr[0 .. T.sizeof];
+        write(arr);
+    }
 }
 
 interface SearchableWriteCursor : WriteCursor
