@@ -426,7 +426,7 @@ interface WriteCursor
 {
     void put(ubyte val);
 
-    void write(const(ubyte)[] arr);
+    void write(scope const(ubyte)[] arr);
 }
 
 interface SearchableWriteCursor : WriteCursor
@@ -490,7 +490,7 @@ class ArrayWriteCursor : SearchableWriteCursor
         _writePos++;
     }
 
-    void write(const(ubyte)[] arr)
+    void write(scope const(ubyte)[] arr)
     {
         if (_writePos == _data.length)
         {
@@ -550,7 +550,7 @@ class FileWriteCursor : WriteCursor
         _file.rawWrite(buf);
     }
 
-    void write(const(ubyte)[] arr)
+    void write(scope const(ubyte)[] arr)
     {
         _file.rawWrite(arr);
     }
