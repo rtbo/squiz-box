@@ -369,6 +369,7 @@ unittest
 {
     import std.algorithm : canFind, map;
     import std.array : array;
+    import std.exception : assertThrown;
     import std.file : mkdir;
     import std.stdio : File;
 
@@ -389,6 +390,9 @@ unittest
     assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-dir/test-parent.txt")));
     assert(entries.canFind(tuple(EntryType.regular, "test-zip/test.txt")));
     assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-link-1.txt")));
+
+    // test that reading from stream triggers an error
+    assertThrown(readBinaryFile(archive).unboxZip().array);
 }
 
 @("Extract Zip squiz-box extra-flags")
