@@ -438,6 +438,8 @@ private struct ZipUnbox(C) if (is(C : Cursor))
     ulong nextHeader;
     Flag!"removePrefix" removePrefix;
     string prefix;
+    bool dataDescriptor;
+    bool zip64;
 
     static if (isSearchable)
     {
@@ -635,14 +637,11 @@ private struct ZipUnbox(C) if (is(C : Cursor))
             "Zip encryption unsupported"
         );
         enforce(
-            (flag & ZipFlag.dataDescriptor) == ZipFlag.none,
-            "Zip format unsupported (data descriptor)"
-        );
-        enforce(
             header.compressionMethod.val == 0 || header.compressionMethod.val == 8,
             "Unsupported Zip compression method"
         );
 
+        info.dataDescriptor = (flag & ZipFlag.dataDescriptor) != ZipFlag.none;
         info.deflated = header.compressionMethod.val == 8;
         info.expectedCrc32 = header.crc32.val;
 
@@ -650,11 +649,13 @@ private struct ZipUnbox(C) if (is(C : Cursor))
         {
             info.size = efInfo.uncompressedSize;
             info.compressedSize = efInfo.compressedSize;
+            info.zip64 = true;
         }
         else
         {
             info.size = header.uncompressedSize.val;
             info.compressedSize = header.compressedSize.val;
+            info.zip64 = false;
         }
 
         info.type = info.compressedSize == 0 ? EntryType.directory : EntryType.regular;
@@ -691,6 +692,13 @@ private struct ZipUnbox(C) if (is(C : Cursor))
     {
         import std.datetime.systime : DosFileTimeToSysTime, unixTimeToStdTime, SysTime;
 
+        if (dataDescriptor)
+        {
+            ZipDataDescriptor.read(input, zip64);
+            dataDescriptor = false;
+            zip64 = false;
+        }
+
         LocalFileHeader header = void;
         input.readValue(&header);
         if (header.signature == CentralFileHeader.expectedSignature)
@@ -724,6 +732,10 @@ private struct ZipUnbox(C) if (is(C : Cursor))
             ZipEntryInfo info;
             info.path = path;
             fillEntryInfo(info, efInfo, header);
+            enforce(!info.dataDescriptor,
+                "ZIP files with data descriptor can only be read with seekable data source." ~
+                " Try to call `unboxZip` with a `File` or `ubyte[]` input parameter."
+            );
             // educated guess for the size in the central directory
             info.entrySize = header.totalLength() +
                 info.compressedSize +
@@ -757,6 +769,8 @@ private struct ZipUnbox(C) if (is(C : Cursor))
                 readEntry();
         }
 
+        dataDescriptor = info.dataDescriptor;
+        zip64 = info.zip64;
         currentEntry = new ZipUnboxEntry!C(input, info);
     }
 }
@@ -806,12 +820,75 @@ private struct ZipEntryInfo
     uint attributes;
     bool deflated;
     uint expectedCrc32;
+    bool dataDescriptor;
+    bool zip64;
 
     version (Posix)
     {
         int ownerId;
         int groupId;
     }
+}
+
+private struct ZipDataDescriptor
+{
+    enum signature = 0x08074b50;
+
+    uint crc32;
+    ulong compressedSize;
+    ulong uncompressedSize;
+
+    static ZipDataDescriptor read(Cursor cursor, bool zip64)
+    {
+        ZipDataDescriptor res = void;
+
+        // the signature is optional (but what if the CRC32 actually equals the signature code ??)
+        auto crc32 = cursor.getValue!(LittleEndian!4)();
+        if (crc32.val == signature)
+        {
+            crc32 = cursor.getValue!(LittleEndian!4)();
+        }
+        res.crc32 = crc32.val;
+
+        if (zip64)
+        {
+            res.compressedSize = cursor.getValue!(LittleEndian!8)().val;
+            res.uncompressedSize = cursor.getValue!(LittleEndian!8)().val;
+        }
+        else
+        {
+            res.compressedSize = cursor.getValue!(LittleEndian!4)().val;
+            res.uncompressedSize = cursor.getValue!(LittleEndian!4)().val;
+        }
+
+        return res;
+    }
+
+    void write(WriteCursor cursor, bool zip64)
+    {
+        assert((uncompressedSize <= 0xffffffff && compressedSize == 0xffffffff) | zip64);
+
+        LittleEndian!4 b4 = signature;
+        cursor.putValue(b4);
+        b4 = this.crc32;
+        cursor.putValue(b4);
+
+        if (zip64)
+        {
+            LittleEndian!8 b8 = this.compressedSize;
+            cursor.putValue(b8);
+            b8 = this.uncompressedSize;
+            cursor.putValue(b8);
+        }
+        else
+        {
+            b4 = cast(uint)this.compressedSize;
+            cursor.putValue(b4);
+            b4 = cast(uint)this.uncompressedSize;
+            cursor.putValue(b4);
+        }
+    }
+
 }
 
 private enum KnownExtraField

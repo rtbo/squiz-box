@@ -364,6 +364,37 @@ unittest
     testExtractedFiles(dm, Yes.mode666);
 }
 
+@("Extract Zip With data descriptor")
+unittest
+{
+    import std.algorithm : canFind, map;
+    import std.array : array;
+    import std.exception : assertThrown;
+    import std.file : mkdir;
+    import std.stdio : File;
+
+    const archive = testPath("data/zip_data-descriptor.zip");
+    const dm = DeleteMe("extraction_site", null);
+
+    mkdir(dm.path);
+
+    auto entries = File(archive, "rb")
+        .unboxZip()
+        .map!(e => tuple(e.type, e.path))
+        .array;
+
+    assert(entries.canFind(tuple(EntryType.directory, "test-zip/")));
+    assert(entries.canFind(tuple(EntryType.directory, "test-zip/test-dir/")));
+    assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-dir/test.txt")));
+    assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-dir/test-link.txt")));
+    assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-dir/test-parent.txt")));
+    assert(entries.canFind(tuple(EntryType.regular, "test-zip/test.txt")));
+    assert(entries.canFind(tuple(EntryType.regular, "test-zip/test-link-1.txt")));
+
+    // test that reading from stream triggers an error
+    assertThrown(readBinaryFile(archive).unboxZip().array);
+}
+
 @("Extract Zip squiz-box extra-flags")
 unittest
 {
