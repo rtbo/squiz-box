@@ -76,8 +76,8 @@ if get_option('enable_test')
     stupid_gen_exe = executable('stupid_gen', 'tools/stupid_gen.d',
         d_import_dirs: include_directories('tools'),
     )
-    squiz_stupid = custom_target('dop_stupid',
-       capture: true,
+    squiz_stupid = custom_target('squiz-stupid',
+        capture: true,
         output: 'stupid.d',
         input: squiz_test_src,
         command: [
