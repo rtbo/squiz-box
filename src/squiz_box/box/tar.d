@@ -467,6 +467,77 @@ size_t encodeLongGnu(ref ubyte[] buffer, size_t offset, string name, Typeflag ty
     return blockLen + l512;
 }
 
+string paxRecordString(string kw, string val)
+{
+    size_t len = kw.length + val.length + 3; // space, =, \n
+    // compute decimal length of len
+    if (len < 10) {
+        len += 1;
+    } else if (len < 100) {
+        len += 2;
+    } else if (len < 1000) {
+        len += 3;
+    } else if (len < 10000) {
+        len += 4;
+    } else {
+        assert(false, "I need a logarithmic algorithm");
+    }
+
+    const rec = format!"%d %s=%s\n"(len, kw, val);
+    assert(rec.length == len);
+    return rec;
+}
+
+size_t encodePax(ref ubyte[] buffer, size_t offset, string[string] records, bool global)
+{
+    const typeflag = global ? Typeflag.extendedGlobal : Typeflag.extendedFile;
+
+    auto recordApp = appender!string;
+    foreach(kw, val; records) {
+        recordApp.put(paxRecordString(kw, val));
+    }
+    const recordStr = recordApp[];
+
+    const l512 = next512(recordStr.length);
+    buffer.ensureLen(offset + blockLen + l512);
+
+    BlockInfo pax = {
+        name: "././@PaxHeader",
+        size: recordStr.length,
+        typeflag: typeflag,
+    };
+    offset += pax.encode(buffer[offset .. $]);
+
+    buffer[offset .. offset + recordStr.length] = recordStr.representation;
+    buffer[offset + recordStr.length .. offset + l512] = 0;
+
+    return blockLen + l512;
+}
+
+string[string] parsePax(string buffer)
+{
+    import std.conv : parse;
+    import std.format : formattedRead;
+
+    string[string] records;
+
+    while(buffer.length) {
+        auto prevBuf = buffer; // parse advances buffer, we need to refer to the one before.
+        const num = parse!size_t(buffer);
+        auto numLen = prevBuf.length - buffer.length;
+        auto rest = prevBuf[numLen .. num];
+
+        string kw;
+        string val;
+        formattedRead(rest, " %s=%s\n", kw, val);
+        records[kw] = val;
+
+        buffer = prevBuf[num .. $];
+    }
+
+    return records;
+}
+
 /// TarInfo contains info for one TAR header, which is one or more TAR blocks
 struct TarInfo
 {
@@ -482,6 +553,9 @@ struct TarInfo
     string gname;
     int devmajor;
     int devminor;
+
+    string[string] gpax; // global pax extended header records
+    string[string] xpax; // file pax extended header records (if any)
 
     size_t entrySize;
     bool isNull;
@@ -523,6 +597,10 @@ struct TarInfo
         {
             encoded += buffer.encodeLongGnu(offset + encoded, lk, Typeflag.gnuLonglink);
             lk = null;
+        }
+
+        if (xpax.length) {
+            encoded += buffer.encodePax(offset + encoded, xpax, false);
         }
 
         buffer.ensureLen(offset + encoded + blockLen);
@@ -575,7 +653,7 @@ struct TarInfo
             return decodeHeader(blk);
         case Typeflag.extendedGlobal:
         case Typeflag.extendedFile:
-            return skipExtendedDecodeHeader(cursor, blk);
+            return decodeExtendedHeader(cursor, blk);
         case Typeflag.gnuLongname:
         case Typeflag.gnuLonglink:
             return decodeGnuLongHeader(cursor, blk);
@@ -621,12 +699,17 @@ struct TarInfo
         return info;
     }
 
-    private static TarInfo skipExtendedDecodeHeader(Cursor cursor, scope ref BlockInfo blk)
+    private static TarInfo decodeExtendedHeader(Cursor cursor, scope ref BlockInfo blk)
     {
-        const sz = next512(blk.size);
-        cursor.ffw(sz);
+        auto data = new char[next512(blk.size)];
+        enforce(cursor.read(data).length == data.length, "Unexpected end of input");
+        auto records = parsePax(assumeUnique(data[0 .. blk.size]));
 
-        return TarInfo.decode(cursor);
+        auto next = TarInfo.decode(cursor);
+        next.entrySize += (blockLen + data.length);
+        next.xpax = records;
+
+        return next;
     }
 
     private static TarInfo decodeGnuLongHeader(Cursor cursor, scope ref BlockInfo blk)
@@ -708,6 +791,11 @@ unittest
     assert(splitLongName(shortPath) == [null, shortPath]);
     assert(splitLongName(veryLongPath) == [null, veryLongPath]);
     assert(splitLongName(longPath) == [longPrefix, longName]);
+}
+
+struct PaxHeader 
+{
+    string[string] records;
 }
 
 struct TarBox(I)
@@ -1050,6 +1138,8 @@ private class TarUnboxEntry : UnboxEntry
     private size_t _end;
     private TarInfo _info;
 
+    private string _path; // caching path
+
     this(Cursor input, TarInfo info)
     {
         _input = input;
@@ -1065,7 +1155,8 @@ private class TarUnboxEntry : UnboxEntry
 
     @property string path()
     {
-        return _info.name;
+        auto xpath = "path" in _info.xpax;
+        return xpath ? *xpath : _info.name;
     }
 
     @property EntryType type()
@@ -1075,7 +1166,8 @@ private class TarUnboxEntry : UnboxEntry
 
     @property string linkname()
     {
-        return _info.linkname;
+        auto xlink = "linkpath" in _info.xpax;
+        return xlink ? *xlink : _info.linkname;
     }
 
     @property size_t size()
