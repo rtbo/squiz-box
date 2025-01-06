@@ -31,6 +31,8 @@ shared static this()
     {
         import std.process;
 
+        execute(["chmod", "644", dataGenPath("file1.txt")]);
+        execute(["chmod", "644", dataGenPath("file 2.txt")]);
         execute(["chmod", "666", dataGenPath("folder", "chmod 666.txt")]);
     }
 }
